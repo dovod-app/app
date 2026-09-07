@@ -66,7 +66,7 @@ func newShareServer(t *testing.T) *shareServer {
 	externalLinkRepo := storage.NewExternalLinkRepository(db)
 	shareRepo := storage.NewShareRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, false)
 	hub := ws.NewHub(log)
 	events := service.NoopNotifier{}
 
@@ -84,7 +84,7 @@ func newShareServer(t *testing.T) *shareServer {
 	obsidianSvc := service.NewObsidianService(researchSvc, sectionSvc, entryRepo, sessionSvc, taskSvc, roadmapSvc,
 		storage.NewEntryRevisionRepository(db), log)
 	teamSvc := service.NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db),
-		researchRepo, events, log)
+		researchRepo, access, events, log)
 	shareSvc := service.NewShareService(shareRepo, access, events, log)
 	skillSvc := service.NewSkillService(storage.NewSkillRepository(db), researchRepo, teamRepo, access, events, log)
 	templateSvc := service.NewTemplateService(storage.NewTemplateRepository(db), storage.NewSkillRepository(db), teamRepo, access, log)
@@ -1013,7 +1013,7 @@ func TestShareRoutes_SkillServiceRefusesAShareContext(t *testing.T) {
 
 	skills := service.NewSkillService(storage.NewSkillRepository(s.db),
 		storage.NewResearchRepository(s.db), storage.NewTeamRepository(s.db),
-		service.NewAccess(storage.NewTeamRepository(s.db)), service.NoopNotifier{},
+		service.NewAccess(storage.NewTeamRepository(s.db), false), service.NoopNotifier{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if _, err := skills.LoadBuiltinSkills(context.Background()); err != nil {
 		t.Fatalf("load builtins: %v", err)

@@ -257,6 +257,13 @@ local account if needed, runs stdio tools as that user, and signs the browser
 in automatically. Use this mode on a trusted local machine. Give each running
 instance its own web port with `--web-port` if another server is using 8088.
 
+`--default-user` is **required** alongside `--auth-enabled` here. Nothing
+authenticates a stdio session — the client starts the process and speaks a pipe
+— so without it the session is nobody, and on a server with accounts nobody is
+a stranger: every tool answers "not found" and the project list comes back
+empty. The server says so at startup. The web UI on the web port is unaffected;
+you sign in there as usual.
+
 Once connected, use the example [start prompt](#how-it-works) or copy one from
 **Methodologies** in the browser.
 
@@ -278,7 +285,7 @@ for a server configuration.
 | JWT signing secret | `--jwt-secret` | `MCP_RESEARCH_JWT_SECRET` | Generated on startup |
 | Registration | `--allow-registration` | `MCP_RESEARCH_ALLOW_REGISTRATION` | `true` |
 | Public URL | `--base-url` | `MCP_RESEARCH_BASE_URL` | — |
-| Local default user | `--default-user` | `MCP_RESEARCH_DEFAULT_USER` | — |
+| Local default user | `--default-user` | `MCP_RESEARCH_DEFAULT_USER` | — (required with `--auth-enabled` on stdio) |
 | Operator API token | `--api-token` | `MCP_RESEARCH_API_TOKEN` | None — writes only from the server's own machine |
 | Revision retention limit | `--revision-limit` | `MCP_RESEARCH_REVISION_LIMIT` | `0` — keep all |
 | Log level | `--log-level` | `MCP_RESEARCH_LOG_LEVEL` | `info` |

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"unicode"
 )
@@ -70,3 +71,18 @@ type IncompleteMetadataError struct {
 func (e *IncompleteMetadataError) Error() string {
 	return "cannot complete: required metadata is unanswered: " + strings.Join(e.Missing, ", ")
 }
+
+// noAuthf is ErrNoAuth with something the reader can act on.
+//
+// ErrNoAuth's own text is "sign in to manage teams" — it was born in
+// TeamService and reads as a non sequitur to a stdio session that asked to
+// create a project and named no team. The wrapper keeps every errors.Is check
+// and the 401 mapping working while saying what actually went wrong.
+func noAuthf(format string, a ...any) error {
+	return &noAuthError{msg: fmt.Sprintf(format, a...)}
+}
+
+type noAuthError struct{ msg string }
+
+func (e *noAuthError) Error() string { return e.msg }
+func (e *noAuthError) Unwrap() error { return ErrNoAuth }

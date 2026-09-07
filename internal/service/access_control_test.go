@@ -474,6 +474,175 @@ func TestAccessControl_NoAuth(t *testing.T) {
 	}
 }
 
+// TestAccessControl_AnonymousCallerWithAccountsOn is the other half of
+// TestAccessControl_NoAuth, and the two together are the whole rule: a caller
+// with no identity is the owner of the instance when there are no accounts, and
+// a stranger when there are.
+//
+// The transport that produces such a caller is stdio. It authenticates nobody —
+// the client spawns the process and speaks a pipe — so `RunStdio` with
+// `auth_enabled: true` and no `--default-user` put nobody in the context. The
+// guard's no-caller rule then applied, and every MCP tool had owner rights over
+// every research in the database, including the deletes added in #53.
+func TestAccessControl_AnonymousCallerWithAccountsOn(t *testing.T) {
+	db := setupTestDB(t)
+	notifier := &mockNotifier{}
+	log := slog.Default()
+	access := testAccessWithAccounts(db)
+
+	researchRepo := storage.NewResearchRepository(db)
+	sectionRepo := storage.NewSectionRepository(db)
+	entryRepo := storage.NewEntryRepository(db)
+	teamRepo := storage.NewTeamRepository(db)
+	researchSvc := NewResearchService(researchRepo, sectionRepo, teamRepo, access, notifier, log)
+	sectionSvc := NewSectionService(sectionRepo, entryRepo, researchRepo, access, notifier, log)
+	entrySvc := NewEntryService(entryRepo, sectionRepo, researchRepo, access, nil,
+		storage.NewBlockRepository(db), storage.NewEntryRevisionRepository(db),
+		storage.NewCrossRefRepository(db), storage.NewExternalLinkRepository(db), notifier, log)
+
+	user := createTestUser(t, db, "someone@test.com", "Someone")
+	owner := userCtx(user)
+	research, sections, err := researchSvc.Create(owner, CreateResearchRequest{
+		Name: "Private", Goal: "g",
+		Sections: []CreateSectionRequest{{Name: "s1", DisplayName: "Section one"}},
+	})
+	if err != nil {
+		t.Fatalf("create research as a real user: %v", err)
+	}
+	if _, err := entrySvc.Create(owner, CreateEntryRequest{
+		ResearchID: research.ID, SectionID: sections[0].ID, Title: "Seed", Content: "body",
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
+	// Nobody. This is exactly what an anonymous stdio session carries.
+	anon := context.Background()
+
+	// The guard itself, first: everything below is a consequence of this.
+	if role, err := access.Role(anon, research.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Access.Role for an anonymous caller = (%q, %v), want ErrNotFound — "+
+			"with accounts on there is no caller who is exempt", role, err)
+	}
+	if role := access.RoleOrEmpty(anon, research.ID); role != "" {
+		t.Errorf("Access.RoleOrEmpty = %q, want empty — the UI draws a read-only screen from this", role)
+	}
+
+	refusals := map[string]func() error{
+		"research get": func() error { _, err := researchSvc.Get(anon, research.ID); return err },
+		"sections":     func() error { _, err := sectionSvc.List(anon, research.ID); return err },
+		"entries":      func() error { _, err := entrySvc.ListByResearch(anon, research.ID, storage.EntryFilter{}); return err },
+		"research update": func() error {
+			_, err := researchSvc.Update(anon, research.ID, UpdateResearchRequest{Goal: ptr("theirs now")})
+			return err
+		},
+	}
+	for name, call := range refusals {
+		if err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound — a stranger must not learn that this research exists", name, err)
+		}
+	}
+
+	// The list does not go through the guard: with no user the member filter is
+	// simply left unset, which is how "no caller" used to mean "every research
+	// on the server" on this path.
+	list, err := researchSvc.List(anon, storage.ResearchFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("list returned %d research(es) to an anonymous caller, want 0", len(list))
+	}
+
+	// Creating is refused too. Allowing it would file the research in the local
+	// team, where the person who asked for it could not read it back.
+	if _, _, err := researchSvc.Create(anon, CreateResearchRequest{Name: "Anon", Goal: "g"}); !errors.Is(err, ErrNoAuth) {
+		t.Errorf("create as an anonymous caller: err = %v, want ErrNoAuth", err)
+	}
+
+	// Moving a research between teams is the highest-value write there is, and
+	// TeamService held its own copy of the no-caller rule. It is unreachable
+	// over HTTP — both routes are accessWrite — and there is no MCP tool for it,
+	// so this test is what keeps it closed if either of those changes.
+	teams := NewTeamService(teamRepo, storage.NewTeamInviteRepository(db),
+		storage.NewUserRepository(db), researchRepo, access, notifier, log)
+	if err := teams.TransferResearch(anon, research.ID, "team-local"); !errors.Is(err, ErrNoAuth) {
+		t.Errorf("transfer as an anonymous caller: err = %v, want ErrNoAuth", err)
+	}
+
+	// And the same caller on an instance with no accounts is still the owner of
+	// everything — the local single-binary mode this product started as.
+	localOnly := NewResearchService(researchRepo, sectionRepo, teamRepo, testAccess(db), notifier, log)
+	if _, err := localOnly.Get(anon, research.ID); err != nil {
+		t.Errorf("with accounts off an anonymous caller must still read everything: %v", err)
+	}
+}
+
+// TestAccessControl_AnonymousCallerAndTheTeamLibraries covers the half that
+// service.Access does not: a skill or a methodology belongs to a *team*, not to
+// a research, so those two services carry the no-caller rule themselves. Both
+// copies said "nobody means everybody", which on an instance with accounts made
+// every team's private library readable and writable from an anonymous stdio
+// session.
+func TestAccessControl_AnonymousCallerAndTheTeamLibraries(t *testing.T) {
+	db := setupTestDB(t)
+	notifier := &mockNotifier{}
+	log := slog.Default()
+	access := testAccessWithAccounts(db)
+	teamRepo := storage.NewTeamRepository(db)
+	skillRepo := storage.NewSkillRepository(db)
+
+	skills := NewSkillService(skillRepo, storage.NewResearchRepository(db), teamRepo, access, notifier, log)
+	templates := NewTemplateService(storage.NewTemplateRepository(db), skillRepo, teamRepo, access, log)
+	teams := NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db),
+		storage.NewResearchRepository(db), access, notifier, log)
+
+	user := createTestUser(t, db, "librarian@test.com", "Librarian")
+	owner := userCtx(user)
+	team, err := teams.Create(owner, "Shared")
+	if err != nil {
+		t.Fatalf("create team: %v", err)
+	}
+	if _, err := skills.CreateTeam(owner, team.ID, SkillInput{
+		Name: "House style", Description: "How this team writes", Body: "secret",
+	}); err != nil {
+		t.Fatalf("seed team skill: %v", err)
+	}
+
+	anon := context.Background()
+	refusals := map[string]func() error{
+		"list a team's skills": func() error { _, err := skills.ListTeam(anon, team.ID); return err },
+		"write a team skill": func() error {
+			_, err := skills.CreateTeam(anon, team.ID, SkillInput{Name: "Mine", Description: "d", Body: "b"})
+			return err
+		},
+		"list a team's templates": func() error { _, err := templates.ListByTeam(anon, team.ID); return err },
+		"write a team template": func() error {
+			_, err := templates.CreateTeam(anon, team.ID, TemplateInput{
+				Name: "Mine", WhenToUse: "w", Body: "b",
+			})
+			return err
+		},
+	}
+	for name, call := range refusals {
+		if err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound", name, err)
+		}
+	}
+
+	// A methodology list is not scoped by a team id, so it cannot refuse — it
+	// narrows instead, to what an instance-wide credential sees: the globals,
+	// and nothing any team wrote.
+	list, err := templates.List(anon)
+	if err != nil {
+		t.Fatalf("template list: %v", err)
+	}
+	for _, tp := range list {
+		if tp.TeamID != "" {
+			t.Errorf("template list gave an anonymous caller %q, which belongs to team %s", tp.Slug, tp.TeamID)
+		}
+	}
+}
+
 // TestAccessControl_Revisions covers the history surface added with entry
 // revisions. A revision holds the entry's full text, so every one of these
 // paths is a copy of the content the ownership check exists to protect — and

@@ -50,6 +50,12 @@ type TeamService struct {
 	researches *storage.ResearchRepository
 	events     EventNotifier
 	log        *slog.Logger
+	// access is here for one question: whether this instance has accounts.
+	// An anonymous caller is the owner of a local single-binary instance and a
+	// stranger on one with accounts, and this service is the only other place
+	// that has to tell them apart. Every research-scoped decision still belongs
+	// to Access itself.
+	access *Access
 }
 
 func NewTeamService(
@@ -57,13 +63,26 @@ func NewTeamService(
 	invites *storage.TeamInviteRepository,
 	users *storage.UserRepository,
 	researches *storage.ResearchRepository,
+	access *Access,
 	events EventNotifier,
 	log *slog.Logger,
 ) *TeamService {
-	return &TeamService{teams: teams, invites: invites, users: users, researches: researches, events: events, log: log}
+	return &TeamService{teams: teams, invites: invites, users: users, researches: researches,
+		access: access, events: events, log: log}
 }
 
 // --- Teams ---
+
+// AccountsEnabled says whether this instance has user accounts.
+//
+// It exists for the one caller that has to explain a refusal rather than just
+// return it: `team_list` answers ErrNoAuth with "this server runs without
+// accounts", which was the only reason for it until an unauthenticated caller
+// on an instance *with* accounts started getting the same error — and being
+// told the opposite of the truth.
+func (s *TeamService) AccountsEnabled() bool {
+	return s.access != nil && s.access.AccountsEnabled()
+}
 
 func (s *TeamService) List(ctx context.Context) ([]*domain.Team, error) {
 	uid := auth.UserIDFromContext(ctx)
@@ -648,6 +667,15 @@ func (s *TeamService) checkTransfer(ctx context.Context, researchID, targetTeamI
 		return nil, ErrNotFound
 	}
 
+	if uid == "" && s.access != nil && s.access.AccountsEnabled() {
+		// The last copy of "nobody means no check" in this service, and the one
+		// that moves a research between teams. It was unreachable — both routes
+		// are accessWrite, so RequireAuth stops an anonymous caller with
+		// accounts on, and no MCP tool calls this — but unreachable is a
+		// property of today's route table, and this is the exact shape of the
+		// bug the rest of this change removes.
+		return nil, ErrNoAuth
+	}
 	if uid != "" {
 		if _, err := s.requireRole(ctx, research.TeamID, domain.TeamOwner); err != nil {
 			return nil, err

@@ -35,7 +35,7 @@ func TestAuthorName_OnlyForSomebodyInTheOwningTeam(t *testing.T) {
 	researchRepo := storage.NewResearchRepository(db)
 	sectionRepo := storage.NewSectionRepository(db)
 	entryRepo := storage.NewEntryRepository(db)
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, false)
 
 	researchSvc := service.NewResearchService(researchRepo, sectionRepo, teamRepo, access, nopNotifier{}, log)
 	entrySvc := service.NewEntryService(entryRepo, sectionRepo, researchRepo, access, nil,

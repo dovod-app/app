@@ -78,11 +78,11 @@ func main() {
 
 	// Every service asks the same guard what the caller may do, so there is one
 	// place to get authorization wrong instead of eight.
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, cfg.AuthEnabled)
 
 	// The hub asks the same guard the HTTP layer does, on every event, so a
 	// membership taken away stops the updates on a socket already open.
-	hub.SetAuthorizer(access, cfg.AuthEnabled)
+	hub.SetAuthorizer(access, access.AccountsEnabled())
 
 	// Events name the research by id; every URL in the web UI names it by short
 	// code. The hub resolves one to the other so a page has both.
@@ -120,7 +120,7 @@ func main() {
 	// only record of what somebody did not believe.
 	exportSvc.SetAnnotations(annotationRepo)
 	obsidianSvc := service.NewObsidianService(researchSvc, sectionSvc, entryRepo, sessionSvc, taskSvc, roadmapSvc, revisionRepo, log)
-	teamSvc := service.NewTeamService(teamRepo, teamInviteRepo, userRepo, researchRepo, events, log)
+	teamSvc := service.NewTeamService(teamRepo, teamInviteRepo, userRepo, researchRepo, access, events, log)
 	shareSvc := service.NewShareService(shareRepo, access, events, log)
 	skillSvc := service.NewSkillService(skillRepo, researchRepo, teamRepo, access, events, log)
 
@@ -243,6 +243,22 @@ func main() {
 			os.Exit(1)
 		}
 	default:
+		// Nothing authenticates a stdio session: the client spawns the process
+		// and speaks a pipe. With accounts on and no default user, every tool
+		// call arrives from nobody — and since #123 nobody is a stranger, so
+		// each one answers "not found" rather than, as before, being handed
+		// owner rights over every research in the database.
+		//
+		// A warning rather than a refusal, because the same process also serves
+		// the web UI and the REST API on the web port: those are authenticated
+		// and working, and taking the whole binary down over an unusable
+		// transport would break the one thing that is fine.
+		if cfg.AuthEnabled && defaultUser == nil {
+			log.Warn("stdio transport cannot authenticate anyone and no default user is set — this session will reach no research",
+				"symptom", "research_list answers an empty list, every tool naming a research answers \"not found\", and research_create refuses with \"this session is not signed in\"",
+				"fix", "set --default-user (or MCP_RESEARCH_DEFAULT_USER / default_user) to the email the stdio session should act as",
+				"unaffected", "the web UI and REST API on the web port")
+		}
 		if err := srv.RunStdio(ctx, defaultUser); err != nil {
 			log.Error("server error", "error", err)
 			os.Exit(1)

@@ -54,7 +54,22 @@ func newSpecServer(t *testing.T, opts ...func(*ServerConfig)) *specServer {
 	crossrefRepo := storage.NewCrossRefRepository(db)
 	externalLinkRepo := storage.NewExternalLinkRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	// The configuration is settled before anything is wired, because the guard
+	// takes `auth_enabled` now: building it from the default and then letting an
+	// option turn accounts off left the services believing in accounts the
+	// server did not have, which is the drift this argument exists to prevent.
+	oauthRepo := storage.NewOAuthRepository(db)
+	cfg := ServerConfig{
+		Port: 0, AuthEnabled: true, APIToken: "operator-token",
+		OAuthSvc: service.NewOAuthService(oauthRepo, log),
+		BaseURL:  "https://research.example.com",
+		Version:  "1.2.3",
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	access := service.NewAccess(teamRepo, cfg.AuthEnabled)
 	hub := ws.NewHub(log)
 	events := service.NoopNotifier{}
 
@@ -72,7 +87,7 @@ func newSpecServer(t *testing.T, opts ...func(*ServerConfig)) *specServer {
 	obsidianSvc := service.NewObsidianService(researchSvc, sectionSvc, entryRepo, sessionSvc, taskSvc, roadmapSvc,
 		storage.NewEntryRevisionRepository(db), log)
 	teamSvc := service.NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db),
-		researchRepo, events, log)
+		researchRepo, access, events, log)
 	shareSvc := service.NewShareService(storage.NewShareRepository(db), access, events, log)
 	skillSvc := service.NewSkillService(storage.NewSkillRepository(db), researchRepo, teamRepo, access, events, log)
 	templateSvc := service.NewTemplateService(storage.NewTemplateRepository(db), storage.NewSkillRepository(db),
@@ -80,20 +95,8 @@ func newSpecServer(t *testing.T, opts ...func(*ServerConfig)) *specServer {
 	annotationSvc := service.NewAnnotationService(storage.NewAnnotationRepository(db), entryRepo,
 		storage.NewEntryRevisionRepository(db), access, entrySvc, entrySvc, events, log)
 
-	oauthRepo := storage.NewOAuthRepository(db)
 	authSvc := service.NewAuthService(storage.NewUserRepository(db), storage.NewAPIKeyRepository(db),
 		oauthRepo, researchRepo, teamRepo, auth.NewJWTManager("test-secret", time.Hour), true, log)
-
-	cfg := ServerConfig{
-		Port: 0, AuthEnabled: true, APIToken: "operator-token",
-		OAuthSvc: service.NewOAuthService(oauthRepo, log),
-		BaseURL:  "https://research.example.com",
-		Version:  "1.2.3",
-	}
-
-	for _, o := range opts {
-		o(&cfg)
-	}
 
 	// main.go only constructs the auth service when accounts are on, so a test
 	// that turns them off has to hand over the same nil — otherwise it is
