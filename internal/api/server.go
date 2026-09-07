@@ -668,11 +668,16 @@ func NewServer(
 		"Creates a research from a portable dump, with new ids and freshly allocated short codes. Cross-references are rewritten to point at the new codes.").
 		tag("Export").
 		body("A portable export.", envelope(map[string]*huma.Schema{"data": sExport})).
-		returns("201", "The research that was created.", envelope(map[string]*huma.Schema{
+		returns("201", "The research that was created, and anything the file carried that the import could not.", envelope(map[string]*huma.Schema{
 			"status":      {Type: "string"},
 			"research_id": {Type: "string"},
 			"code":        {Type: "string"},
 			"name":        {Type: "string"},
+			// Absent when there is nothing to report. Present, each string names
+			// one thing that did not survive — a section whose writing
+			// instruction was over the 500-character limit arrives without one,
+			// because it is dropped rather than truncated.
+			"warnings": {Type: "array", Items: &huma.Schema{Type: "string"}},
 		})).
 		build(), importHandler.Import)
 	// One markdown file into one section — the other half of the single-document

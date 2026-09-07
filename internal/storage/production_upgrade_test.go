@@ -63,8 +63,13 @@ func TestProductionUpgrade_SQLiteFilePreservesExistingData(t *testing.T) {
 	oldSectionColumns, sectionsBefore := sectionConstraints(t, old, nil)
 	// The comparison below is only worth making if the snapshot actually holds
 	// the constraint it exists to protect. Two empty strings compare equal.
-	if !strings.Contains(sectionsBefore, "CASCADE") || !strings.Contains(sectionsBefore, "research_id") {
-		t.Fatalf("the sections snapshot does not carry the cascade it is meant to guard:\n%s", sectionsBefore)
+	// Named exactly, because a guard that merely finds the word "name" is
+	// satisfied by the `name` column in table_info and would pass over an
+	// index_info section that had gone missing.
+	for _, want := range []string{"CASCADE", "PRAGMA index_info(sqlite_autoindex_sections_2)", "[0 1 research_id]", "[1 2 name]"} {
+		if !strings.Contains(sectionsBefore, want) {
+			t.Fatalf("the sections snapshot is missing %q, so it does not guard what it claims to:\n%s", want, sectionsBefore)
+		}
 	}
 	schema := upgradeSchema(t, old)
 	path := filepath.Join(t.TempDir(), "research.db")
@@ -154,6 +159,39 @@ func TestProductionUpgrade_SQLiteFilePreservesExistingData(t *testing.T) {
 	}
 }
 
+// indexNames lists a table's indexes, sorted, so index_info can be asked about
+// each one in a stable order.
+func indexNames(t *testing.T, db *bun.DB, table string) []string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), "PRAGMA index_list("+table+")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			t.Fatal(err)
+		}
+		// Column 1 is the index name in every SQLite version this runs on.
+		names = append(names, fmt.Sprintf("%s", values[1]))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // sectionConstraints is what upgradeSchema cannot assert about `sections`.
 //
 // 030 appends a column, so the stored CREATE TABLE text differs across the
@@ -202,7 +240,16 @@ func sectionConstraints(t *testing.T, db *bun.DB, only map[string]bool) (map[str
 	sort.Strings(info)
 	out.WriteString(strings.Join(info, "\n"))
 
-	for _, pragma := range []string{"PRAGMA foreign_key_list(sections)", "PRAGMA index_list(sections)"} {
+	// index_list names each index and says whether it is unique; it does not say
+	// which columns it covers. So a rebuild that turned UNIQUE(research_id, name)
+	// into UNIQUE(research_id, code) produced byte-identical output here and
+	// passed — the uniqueness this table depends on is the columns, not the
+	// count. index_info is appended per index for exactly that.
+	pragmas := []string{"PRAGMA foreign_key_list(sections)", "PRAGMA index_list(sections)"}
+	for _, name := range indexNames(t, db, "sections") {
+		pragmas = append(pragmas, "PRAGMA index_info("+name+")")
+	}
+	for _, pragma := range pragmas {
 		rows, err := db.QueryContext(ctx, pragma)
 		if err != nil {
 			t.Fatal(err)

@@ -19,6 +19,12 @@ import (
 // no-information-leak rule the access layer enforces, and the status has to
 // carry it through unchanged.
 func writeServiceError(w http.ResponseWriter, err error) {
+	// Named refusals come first: a caller that can fix one field deserves to be
+	// told which. The generic 400 below carries only a sentence.
+	if errors.Is(err, service.ErrSectionInstructionLong) {
+		writeFieldError(w, err.Error(), "instruction")
+		return
+	}
 	// Checked before the sentinel list: this one carries a payload, and the only
 	// useful thing a client can do with the refusal is name the fields, which a
 	// bare message cannot.
@@ -61,7 +67,6 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		errors.Is(err, service.ErrTextReplaceNotFound),
 		errors.Is(err, service.ErrTextReplaceOnBlocks),
 		errors.Is(err, service.ErrInvalidFieldSpec),
-		errors.Is(err, service.ErrSectionInstructionLong),
 		// Import is the one write in this product that refuses rather than
 		// reports, because a person is standing over the file with an undo.
 		// See the comment at the top of import_markdown.go.
