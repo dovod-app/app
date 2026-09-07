@@ -36,10 +36,6 @@
 
       <p v-if="consequences" class="delete-research__warning">{{ consequences }}</p>
 
-      <p v-if="stale" class="delete-research__stale">
-        This project changed while this was open — the counts above may be out of date.
-      </p>
-
       <div class="delete-research__export">
         <button
           type="button"
@@ -54,7 +50,7 @@
       </div>
 
       <div class="delete-research__confirm">
-        <label class="delete-research__label" :for="fieldId">Type {{ code }} to confirm</label>
+        <label class="delete-research__label" :for="fieldId">Type {{ confirmWord }} to confirm</label>
         <input
           :id="fieldId"
           v-model="typed"
@@ -84,9 +80,10 @@
         <button type="button" class="btn btn-sm" :disabled="busy" @click="close">Cancel</button>
         <button
           type="button"
-          class="btn btn-sm btn-danger"
-          :disabled="!matches || permanentlyRefused"
-          :aria-disabled="busy ? 'true' : undefined"
+          class="btn btn-sm btn-danger btn-danger--solid"
+          :disabled="!matches"
+          :aria-disabled="busy || permanentlyRefused ? 'true' : undefined"
+          :aria-describedby="hintId"
           @click="submit"
         >
           {{ busy ? 'Deleting…' : failure ? 'Try again' : 'Delete' }}
@@ -97,7 +94,11 @@
 </template>
 
 <script setup lang="ts">
-import type { DeletionSummary } from '~/composables/useResearchDelete'
+import {
+  deletionConsequences,
+  deletionLines,
+  type DeletionSummary,
+} from '~/composables/useResearchDelete'
 
 /**
  * Destroying a project, confirmed by typing its short code.
@@ -105,8 +106,8 @@ import type { DeletionSummary } from '~/composables/useResearchDelete'
  * Not a variant of ConfirmModal. That one has no input, and giving it one would
  * put a field on every other confirmation in the product — the same call
  * SendBackModal already made and recorded. This dialog additionally carries the
- * summary list, an export offer and a staleness notice, none of which belong on
- * a generic confirm.
+ * summary list and an export offer, neither of which belongs on a generic
+ * confirm.
  *
  * The typed code is the whole feature. It is compared case-insensitively and
  * whitespace-trimmed, and **paste is deliberately not blocked**: the safety is
@@ -121,8 +122,6 @@ const props = defineProps<{
   summary: DeletionSummary | null
   loading?: boolean
   summaryFailed?: boolean
-  /** The project changed under the open dialog, so the counts may be stale. */
-  stale?: boolean
   busy?: boolean
   /** A failure to report, already turned into a sentence by the caller. */
   failure?: string | null
@@ -141,58 +140,30 @@ const download = useDownload()
 const savedAs = ref<string | null>(null)
 const downloadError = ref<string | null>(null)
 
-const matches = computed(
-  () => typed.value.trim().toUpperCase() === props.code.trim().toUpperCase(),
+/**
+ * A project always has a short code, but the payload's is optional and the list
+ * falls back to the id. A uuid cannot be typed into a 12-character field, so
+ * without this the confirm could never match and the project could never be
+ * deleted from that screen.
+ */
+const confirmWord = computed(() =>
+  props.code && props.code.length <= 12 ? props.code : 'DELETE',
 )
 
-function plural(n: number, one: string, many: string) {
-  return `${n} ${n === 1 ? one : many}`
-}
+const matches = computed(
+  () => typed.value.trim().toUpperCase() === confirmWord.value.trim().toUpperCase(),
+)
 
-/**
- * Only non-zero rows. Sessions and questions share a line because a session
- * with no questions is not a separate idea.
- */
-const lines = computed<string[]>(() => {
-  const s = props.summary
-  if (!s) return []
-  const out: string[] = []
-  if (s.sections) out.push(plural(s.sections, 'section', 'sections'))
-  if (s.entries) out.push(plural(s.entries, 'document', 'documents'))
-  if (s.sessions) {
-    out.push(
-      s.questions
-        ? `${plural(s.sessions, 'session', 'sessions')} and ${plural(s.questions, 'question', 'questions')}`
-        : plural(s.sessions, 'session', 'sessions'),
-    )
-  }
-  if (s.tasks) out.push(plural(s.tasks, 'task', 'tasks'))
-  if (s.roadmaps) out.push(plural(s.roadmaps, 'roadmap', 'roadmaps'))
-  if (s.annotations) out.push(plural(s.annotations, 'mark', 'marks'))
-  return out
-})
-
-/** What happens outside this project — the part that changes a decision. */
-const consequences = computed(() => {
-  const s = props.summary
-  if (!s) return ''
-  const parts: string[] = []
-  if (s.shares) {
-    parts.push(`${plural(s.shares, 'share link', 'share links')} stop${s.shares === 1 ? 's' : ''} working.`)
-  }
-  if (s.incoming_refs) {
-    const from = s.incoming_from ?? []
-    let where = ''
-    if (from.length === 1) where = ` from ${from[0]!.code}`
-    else if (from.length > 1) where = ` from ${from[0]!.code} and ${from.length - 1} other${from.length - 1 === 1 ? '' : 's'}`
-    parts.push(`${plural(s.incoming_refs, 'reference', 'references')}${where} stop resolving.`)
-  }
-  return parts.join(' ')
-})
+// Both from the composable that owns DeletionSummary, so this dialog and the
+// danger-zone row on the settings page cannot drift. They had: the row counted
+// neither roadmaps nor marks, so a project holding only those read "Nothing has
+// been filed under this project yet" in the row and listed two items here.
+const lines = computed<string[]>(() => deletionLines(props.summary))
+const consequences = computed(() => deletionConsequences(props.summary))
 
 const hint = computed(() => {
   if (props.failure) return props.failure
-  if (mismatch.value) return `That is not the code. Type ${props.code} exactly as it appears above.`
+  if (mismatch.value) return `That is not the code. Type ${confirmWord.value} exactly as it appears above.`
   return 'This deletes the project and everything in it.'
 })
 
@@ -225,7 +196,9 @@ async function downloadCopy() {
     `${props.code}.json`,
   )
   if (ok) savedAs.value = download.filename.value
-  else downloadError.value = `Could not download a copy. ${download.error.value?.message ?? ''}`.trim()
+  // useDownload's messages are deliberately noun-less fragments, so the lead-in
+  // has to end mid-sentence for them to read as one.
+  else downloadError.value = `A copy could not be downloaded — ${download.error.value?.message ?? 'the request failed.'}`
 }
 
 // A reopened dialog starts empty. Leaving the code typed would mean the second
@@ -247,6 +220,13 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* The global rule adds 20px on top of the column's 16px gap, and flex gaps do
+   not collapse with margins — so the action row sat 36px below the field while
+   every other section was 16px apart. */
+.delete-research .modal-actions {
+  margin-top: 0;
 }
 
 .delete-research__subject {
@@ -285,12 +265,6 @@ watch(
   margin: 0;
   font-size: var(--type-xs);
   color: var(--color-warning);
-}
-
-.delete-research__stale {
-  margin: 0;
-  font-size: var(--type-xs);
-  color: var(--color-text-muted);
 }
 
 .delete-research__export {

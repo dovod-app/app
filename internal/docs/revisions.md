@@ -8,6 +8,12 @@ This exists because entries are written by models across many sessions. The
 third session can quietly make a document worse, and without a history nobody
 can prove it happened or get the earlier text back.
 
+**Deletion is the one thing a history does not survive.** The revisions belong to
+the entry: `entry_delete` takes them, a forced `section_delete` takes them for
+every document in the section, and `research_delete` takes them for the whole
+research. There is no trash and no restore afterwards — the snapshots protect you
+against a bad edit, never against a delete.
+
 ## What a revision holds
 
 | Field | Meaning |

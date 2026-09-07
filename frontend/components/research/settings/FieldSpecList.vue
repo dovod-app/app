@@ -304,10 +304,14 @@ async function save(section: any) {
 .spec-heading { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .spec-head-right { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 
+/* Warning, not muted: this is the same concept as DangerRow's `.danger-reason`
+   — a visible sentence explaining a disabled destructive control, wired through
+   aria-describedby — and rendering one as a warning and the other as body
+   chrome would make one idea look like two. */
 .spec-refusal {
   margin: 0 0 var(--space-2);
   font-size: var(--type-xs);
-  color: var(--color-text-muted);
+  color: var(--color-warning);
 }
 
 .spec-blurb {

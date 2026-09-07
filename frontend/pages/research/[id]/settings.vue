@@ -222,28 +222,16 @@ watch(research, r => setFromResearch(r), { immediate: true })
 const del = useResearchDelete()
 const deleteOpen = ref(false)
 
-/* One sentence, and it omits every zero term. A note that reads "0 sections, 0
-   documents" is worse than no note: it invites the reader to skim past the one
-   number that is not zero. */
+/* The same sentence the dialog builds its list from — one entity table in
+   useResearchDelete, so adding an entity to the cascade updates both surfaces.
+   Written twice, they had already drifted: this row counted neither roadmaps
+   nor marks. */
 const deleteNote = computed(() => {
   if (del.summaryFailed.value) {
     return 'Deletes the project and everything filed under it. This cannot be undone.'
   }
-  const s = del.summary.value
-  if (!s) return undefined
-  const parts: string[] = []
-  const add = (n: number, one: string, many: string) => {
-    if (n) parts.push(`${n} ${n === 1 ? one : many}`)
-  }
-  add(s.sections, 'section', 'sections')
-  add(s.entries, 'document', 'documents')
-  add(s.sessions, 'session', 'sessions')
-  add(s.questions, 'question', 'questions')
-  add(s.tasks, 'task', 'tasks')
-  if (!parts.length) return 'Nothing has been filed under this project yet. This cannot be undone.'
-  const last = parts.pop()
-  const list = parts.length ? `${parts.join(', ')} and ${last}` : last
-  return `Removes ${list}. This cannot be undone.`
+  if (!del.summary.value) return undefined
+  return deletionSentence(del.summary.value)
 })
 
 /* The row's sentence needs the counts before anything is clicked, so they are
@@ -272,7 +260,9 @@ async function confirmDelete() {
   deleteOpen.value = false
   await router.push({ name: 'index' })
   if (outcome === 'already-gone') {
-    toasts.push({ variant: 'info', title: 'Already deleted', message: `“${name}” had already been removed.` })
+    // Neutral: a 404 also means the caller lost access, and the project
+    // may be alive and in use.
+    toasts.push({ variant: 'info', title: 'No longer available', message: `“${name}” is no longer available here.` })
   } else {
     // No undo action: there is none, and a toast implying one is the single
     // worst thing this feature could ship.
@@ -408,16 +398,16 @@ onMounted(async () => {
    re-create the accident the refusal prevents. */
 async function deleteSection(sectionId: string) {
   const section = sections.value.find((s: any) => s.id === sectionId)
-  try {
-    await authFetch(`${base}/api/sections/${sectionId}`, { method: 'DELETE' })
+  const outcome = await deleteEntity(
+    authFetch,
+    `${base}/api/sections/${sectionId}`,
+    'section',
+    toasts,
+    section?.display_name || section?.name,
+  )
+  // A section somebody else already deleted still has to leave this list.
+  if (outcome !== 'failed') {
     researchData.value = await authFetch<any>(`${base}/api/researches/${id}`)
-    toasts.push({
-      variant: 'success',
-      title: 'Section deleted',
-      message: `“${section?.display_name || section?.name || 'The section'}” has been removed.`,
-    })
-  } catch (e: any) {
-    toasts.error(e?.data?.error ?? 'The server refused it.', 'Could not delete section')
   }
 }
 

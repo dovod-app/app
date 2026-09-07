@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/dovod-app/app/internal/domain"
 	"github.com/uptrace/bun"
@@ -121,13 +122,13 @@ func (r *ResearchRepository) DeletionSummary(ctx context.Context, researchID str
 	var s domain.DeletionSummary
 
 	direct := map[string]*int{
-		"sections":    &s.Sections,
-		"entries":     &s.Entries,
-		"sessions":    &s.Sessions,
-		"tasks":       &s.Tasks,
-		"roadmaps":    &s.Roadmaps,
-		"annotations": &s.Annotations,
-		"shares":      &s.Shares,
+		"sections":        &s.Sections,
+		"entries":         &s.Entries,
+		"sessions":        &s.Sessions,
+		"tasks":           &s.Tasks,
+		"roadmaps":        &s.Roadmaps,
+		"annotations":     &s.Annotations,
+		"research_memory": &s.Memory,
 	}
 	for table, into := range direct {
 		if err := selectRow(ctx, r.db.NewSelect().
@@ -135,6 +136,20 @@ func (r *ResearchRepository) DeletionSummary(ctx context.Context, researchID str
 			Where("research_id=?", researchID)).Scan(into); err != nil {
 			return s, fmt.Errorf("count %s: %w", table, err)
 		}
+	}
+
+	// Live links only, the same definition ShareRepository uses. Revoking sets
+	// `revoked_at` rather than removing the row, so a plain COUNT told a reader
+	// that three links would stop working while the badge on the project page
+	// beside it said one — a count disagreeing with the list under it, in the
+	// dialog whose whole job is to be accurate.
+	if err := selectRow(ctx, r.db.NewSelect().
+		ColumnExpr("COUNT(*)").TableExpr("shares").
+		Where("research_id=?", researchID).
+		Where("revoked_at IS NULL").
+		Where("expires_at IS NULL OR expires_at > ?", time.Now().UTC().Format(time.DateTime))).
+		Scan(&s.Shares); err != nil {
+		return s, fmt.Errorf("count shares: %w", err)
 	}
 
 	// Questions hang off sessions, so they are counted through the join rather
@@ -146,51 +161,47 @@ func (r *ResearchRepository) DeletionSummary(ctx context.Context, researchID str
 		return s, fmt.Errorf("count questions: %w", err)
 	}
 
-	// References from other researches into this one. Not destroyed — they
-	// survive as unresolved text — but the reader is about to break them, and
-	// that is worth saying before rather than after.
-	if err := selectRow(ctx, r.db.NewSelect().
-		ColumnExpr("COUNT(*)").TableExpr("crossrefs").
-		Where("target_research_id=?", researchID).
-		Where("source_research_id<>?", researchID)).Scan(&s.IncomingRefs); err != nil {
-		return s, fmt.Errorf("count incoming refs: %w", err)
+	// Which researches cite this one, and how many times each.
+	//
+	// Grouped rather than counted flat, and carrying the id, because the
+	// service has to drop the ones the caller may not read before either the
+	// names or the total reach them. Cross-references resolve without asking
+	// what their author may see — that is deliberate — so this join would
+	// otherwise announce the existence and the *name* of a research in a team
+	// the caller is not in. `Access.VisibleIncomingCrossRefs` states the rule
+	// this query has to obey: even a stripped version announces that an unseen
+	// research cites this one.
+	rows, err := r.db.NewSelect().
+		ColumnExpr("r.id, r.code, r.name, COUNT(*) AS refs").
+		TableExpr("crossrefs AS c").
+		Join("JOIN researches AS r ON r.id = c.source_research_id").
+		Where("c.target_research_id=?", researchID).
+		Where("c.source_research_id<>?", researchID).
+		GroupExpr("r.id, r.code, r.name").
+		OrderExpr("r.code").
+		Rows(ctx)
+	if err != nil {
+		return s, fmt.Errorf("list citing researches: %w", err)
 	}
-
-	if s.IncomingRefs > 0 {
-		// Whose work is about to be left with dead references. DISTINCT because
-		// one research citing this one eight times is one research to name.
-		rows, err := r.db.NewSelect().
-			ColumnExpr("DISTINCT r.code, r.name").
-			TableExpr("crossrefs AS c").
-			Join("JOIN researches AS r ON r.id = c.source_research_id").
-			Where("c.target_research_id=?", researchID).
-			Where("c.source_research_id<>?", researchID).
-			OrderExpr("r.code").
-			Limit(citingResearchLimit).
-			Rows(ctx)
-		if err != nil {
-			return s, fmt.Errorf("list citing researches: %w", err)
+	defer rows.Close()
+	for rows.Next() {
+		var c domain.CitingResearch
+		if err := rows.Scan(&c.ID, &c.Code, &c.Name, &c.Refs); err != nil {
+			return s, fmt.Errorf("scan citing research: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var c domain.CitingResearch
-			if err := rows.Scan(&c.Code, &c.Name); err != nil {
-				return s, fmt.Errorf("scan citing research: %w", err)
-			}
-			s.IncomingFrom = append(s.IncomingFrom, c)
-		}
-		if err := rows.Err(); err != nil {
-			return s, fmt.Errorf("list citing researches: %w", err)
-		}
+		s.IncomingFrom = append(s.IncomingFrom, c)
+	}
+	if err := rows.Err(); err != nil {
+		return s, fmt.Errorf("list citing researches: %w", err)
 	}
 
 	return s, nil
 }
 
-// citingResearchLimit caps the names, not the count. The count is what the
+// CitingResearchLimit caps the names, not the count. The count is what the
 // decision turns on; the names are there so it is not an abstraction, and a
 // dialog listing eighty of them is neither readable nor a better warning.
-const citingResearchLimit = 10
+const CitingResearchLimit = 10
 
 // DeleteCascade removes a section and the documents filed in it.
 //
@@ -202,12 +213,32 @@ const citingResearchLimit = 10
 // The cleanup lives here rather than in the service so it shares the delete's
 // transaction: a section whose documents are gone but whose references still
 // resolve is a worse state than either end of the operation.
-func (r *SectionRepository) DeleteCascade(ctx context.Context, sectionID string) error {
+// SectionHasEntriesError is returned when expectEmpty was asked for and the
+// section turned out to hold documents. It carries the count because the
+// refusal a caller sees names it, and the only place that number is true is
+// inside the transaction that just read it.
+type SectionHasEntriesError struct{ Count int }
+
+func (e *SectionHasEntriesError) Error() string {
+	return fmt.Sprintf("section has %d entries", e.Count)
+}
+
+func (r *SectionRepository) DeleteCascade(ctx context.Context, sectionID string, expectEmpty bool) error {
 	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var entryIDs []string
 		if err := tx.NewSelect().Column("id").Table("entries").
 			Where("section_id=?", sectionID).Scan(ctx, &entryIDs); err != nil {
 			return fmt.Errorf("collect entries: %w", err)
+		}
+
+		// The refusal is decided here, inside the transaction, and not from a
+		// count the service took first. Counted outside, it was advisory: the
+		// connection is released between the COUNT and the DELETE, so an agent
+		// filing a document into the section through `entry_create` in that
+		// window had it destroyed with `force` never set and nothing in the
+		// response saying a document had gone.
+		if expectEmpty && len(entryIDs) > 0 {
+			return &SectionHasEntriesError{Count: len(entryIDs)}
 		}
 
 		if len(entryIDs) > 0 {
@@ -269,6 +300,23 @@ func (r *QuestionRepository) DeleteCascade(ctx context.Context, questionID strin
 		}
 		return nil
 	})
+}
+
+// UnresolveTargetEntries turns references pointing at these documents back into
+// unresolved text, keeping `target_ref` so the reader still sees what was cited.
+//
+// Used by the single-document delete, which has no transaction of its own; the
+// section and research cascades do the same thing inside theirs.
+func (r *CrossRefRepository) UnresolveTargetEntries(ctx context.Context, entryIDs []string) error {
+	if len(entryIDs) == 0 {
+		return nil
+	}
+	_, err := r.db.NewUpdate().Table("crossrefs").
+		Set("target_entry_id=NULL").
+		Set("target_research_id=NULL").
+		Set("resolved=0").
+		Where("target_entry_id IN (?)", bun.In(entryIDs)).Exec(ctx)
+	return err
 }
 
 // deleteRefsBySource clears both reference tables for a set of sources. They are

@@ -588,6 +588,14 @@ func (s *EntryService) Delete(ctx context.Context, id string) error {
 	// Clean up cross-references and external links
 	if s.crossrefs != nil {
 		_ = s.crossrefs.ReplaceForSource(ctx, "entry", id, nil)
+		// And the ones pointing *at* it. The route description has always said
+		// "references to it in other documents stay as written and stop
+		// resolving"; only the first half was true. `crossrefs` has no foreign
+		// keys, so a `[[E5]]` into a deleted document kept `resolved = 1` and a
+		// target id that no longer exists — a link into nothing, and an edge the
+		// graph went on drawing. Deleting a whole research already does this;
+		// deleting one document did not.
+		_ = s.crossrefs.UnresolveTargetEntries(ctx, []string{id})
 	}
 	if s.externalLinks != nil {
 		_ = s.externalLinks.ReplaceForSource(ctx, "entry", id, nil)

@@ -104,6 +104,12 @@ const config: StorybookConfig = {
                 // a composable throws in setup() and the story renders blank.
                 'useServerInfo',
                 'useRuntimeConfig',
+                // DeleteResearchDialog offers a copy of the project before
+                // destroying it, and calls this in setup(). Unresolved it is a
+                // ReferenceError before the first render, so every one of that
+                // dialog's stories was a blank canvas — the ea31ebb failure on
+                // the one dialog in the product whose whole job is to be read.
+                'useDownload',
                 'useRealtimeUpdates',
                 'useKeyboardNav',
                 'navigateTo',

@@ -168,6 +168,12 @@ export function useAccessRevoked() {
     // emitted as access.revoked by the server, because the copy differs: their
     // access did not end, the project did.
     if (event.type === 'research.deleted') {
+      // Not at the person who pressed Delete. The event is emitted before the
+      // response and directed at every member including the actor, so without
+      // this the deleting tab could paint "was deleted by an owner" at itself
+      // for a frame — or, with an editor open on the page, raise the sticky
+      // no-timeout toast that follows them to the list and never dismisses.
+      if (isSelf(event)) return
       const deleted: Revocation = {
         scope: 'research',
         id: event.entity_id,

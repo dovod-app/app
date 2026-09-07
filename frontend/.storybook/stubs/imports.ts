@@ -1,5 +1,7 @@
 import { ref, computed, isRef, watch, toValue } from 'vue'
 import { resolveMockApiData, runMockFetch } from '../../__mocks__/api'
+import { createMockDownload } from '../../__mocks__/download'
+import { mockAuthState } from '../../__mocks__/auth'
 
 export {
   ref,
@@ -79,10 +81,14 @@ export const useApi = (url: any) => {
  * catalogue in its viewer variant, with no edit control anywhere and no failing
  * assertion to say so. RoadmapNodePopover.stories.ts documents its own reliance
  * on this being true.
+ *
+ * It stays true by default and is now settable, through `mockAuth()` in
+ * __mocks__/auth.ts, because `ResearchCard` reads it as the auth-off half of a
+ * two-branch rule and a read-only server is a state that rule has.
  */
 export const useServerInfo = () => ({
   info: ref({ status: 'ok', version: 'dev', in_memory: true, write_api: true, auth_enabled: false }),
-  writeApi: ref(true),
+  writeApi: mockAuthState().writeApi,
   version: ref('dev'),
   load: () => Promise.resolve(),
 })
@@ -90,7 +96,11 @@ export const useServerInfo = () => ({
 export const useAuth = () => ({
   user: ref(null),
   token: ref(null),
-  authEnabled: ref(false),
+  // Shared across every component in the story, as it is in the product: one
+  // module-scoped composable answers all of them. A story turns accounts on
+  // through `mockAuth({ authEnabled: true })`, which is the only way to reach
+  // the role half of `ResearchCard`'s menu rule.
+  authEnabled: mockAuthState().authEnabled,
   allowRegistration: ref(true),
   loading: ref(false),
   isAuthenticated: computed(() => false),
@@ -109,3 +119,14 @@ export const useCrossRefs = () => ({ renderRefs })
 
 export const useRealtimeUpdates = (_handler?: any) => {}
 export const useKeyboardNav = () => {}
+
+/**
+ * Downloading a file the API only hands out to an authenticated request.
+ *
+ * Stubbed rather than resolved to the real composable, unlike `useToasts` and
+ * `relativeTime`: the real one calls `$fetch.raw` (which does not exist here)
+ * and ends by handing a blob to a synthetic `<a download>` — so a reader
+ * clicking through the catalogue would collect files on their disk. The story
+ * picks the outcome through `mockDownload()` in __mocks__/download.ts.
+ */
+export const useDownload = () => createMockDownload()

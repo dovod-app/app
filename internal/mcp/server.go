@@ -99,7 +99,7 @@ func (s *Server) RunStdio(ctx context.Context, defaultUser *domain.User) error {
 // RunSSE serves the legacy SSE transport on its own listener.
 //
 // apiToken is the instance-wide write token. It matters here because this
-// listener carries the same 52 tools the HTTP API's writes go through, and it
+// listener carries the same tools the HTTP API's writes go through, and it
 // used to be gated only when accounts were on: an instance configured with
 // `api_token` and no accounts refused an anonymous `POST /api/entries` and then
 // handed the same caller a working MCP session on this port. The three cases

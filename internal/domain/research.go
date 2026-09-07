@@ -117,6 +117,7 @@ type DeletionSummary struct {
 	Tasks        int `json:"tasks"`
 	Roadmaps     int `json:"roadmaps"`
 	Annotations  int `json:"annotations"`
+	Memory       int `json:"memory"`
 	Shares       int `json:"shares"`
 	IncomingRefs int `json:"incoming_refs"`
 
@@ -125,10 +126,25 @@ type DeletionSummary struct {
 	// only how many. Capped — the number is the decision, the names are the
 	// context, and a list of eighty is neither.
 	IncomingFrom []CitingResearch `json:"incoming_from"`
+	// IncomingFromTotal is how many researches there are before the cap, so a
+	// client can say "and 79 others" rather than "and 9 others". Without it a
+	// list of exactly ten is indistinguishable from a truncated eighty, and the
+	// one sentence in the dialog written to change a decision was wrong by an
+	// order of magnitude.
+	IncomingFromTotal int `json:"incoming_from_total"`
 }
 
 // CitingResearch is one research that references the one being deleted.
+//
+// ID is carried so the service can ask whether the caller may see this research
+// at all, and is never serialised: a code and a name are what a reader needs,
+// and the id is only ever an internal join key here.
 type CitingResearch struct {
+	ID   string `json:"-"`
 	Code string `json:"code"`
 	Name string `json:"name"`
+	// Refs is how many references this research holds into the one being
+	// deleted, so the total can be summed over only the ones the caller may
+	// see.
+	Refs int `json:"-"`
 }

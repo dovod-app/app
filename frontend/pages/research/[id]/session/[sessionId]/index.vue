@@ -287,20 +287,19 @@ const deleteSessionMessage = computed(() => {
 
 async function deleteSession() {
   deletingSession.value = true
-  try {
-    await authFetch(`${rtBase}/api/sessions/${session.value.id}`, { method: 'DELETE' })
-    confirmDeleteSession.value = false
-    await navigateTo(`/research/${researchSlug.value}/sessions`)
-    useToasts().push({
-      variant: 'success',
-      title: 'Session deleted',
-      message: `“${session.value?.title ?? 'The session'}” has been removed.`,
-    })
-  } catch (e: any) {
-    useToasts().error(e?.data?.error ?? 'The server refused it.', 'Could not delete session')
-  } finally {
-    deletingSession.value = false
-  }
+  const title = session.value?.title
+  const outcome = await deleteEntity(
+    authFetch,
+    `${rtBase}/api/sessions/${session.value.id}`,
+    'session',
+    useToasts(),
+    title,
+  )
+  deletingSession.value = false
+  if (outcome === 'failed') return
+  // Both a delete and an already-gone leave this page pointing at nothing.
+  confirmDeleteSession.value = false
+  await navigateTo(`/research/${researchSlug.value}/sessions`)
 }
 const progress  = computed(() => ({
   total:    data.value?.data?.progress?.total    ?? 0,

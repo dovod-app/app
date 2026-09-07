@@ -310,6 +310,13 @@ When the research has a natural progression, sequence, or decision tree, create 
    - the research and per-session export pages produce markdown or PDF
    - `research_export` with `format: "obsidian"` returns a link to a zip shaped like an Obsidian vault (a folder per section, a note per entry, `[[E3]]` resolving as a link) — offer this when the user keeps notes in Obsidian or wants the research as files. The link needs their bearer token
    - `research_export` with no `format` returns the portable JSON, which is for moving the research to another server, not for reading
+6. **Finishing is not deleting.** `research_update` with `status: "completed"`
+   records that the work is done, and `archived` puts the research out of the
+   way; both are reversible and one of them is what "we're done with this"
+   means. `research_delete` destroys the research and everything in it with no
+   trash and no restore, needs `confirm: true` and an owner, and is only ever
+   right when a person named that research and asked for it to be gone — see
+   [MCP Client Guide → Deleting Is Permanent](/llms/mcp-client-guide.md#deleting-is-permanent)
 
 ## Short Codes
 
@@ -327,7 +334,7 @@ Every record gets an auto-assigned short code on creation:
 | Node | `N` | per roadmap | `N1`, `N2` |
 | Annotation | `A` | per research | `A1`, `A2` |
 
-REST responses carry the `code` field on every entity. MCP tools are less complete: `research_create`, `research_import`, `research_get`, `entry_create`, `entry_list`, `entry_read`, `entry_patch`, `session_get`, the two `annotation_*` tools and the `roadmap_*` tools return codes, while section, question and task codes are only reachable through the REST API. Codes can be used in URLs instead of UUIDs (`/research/R1/entry/E2`), but as tool arguments only `research_get`, `research_update`, `research_export`, `session_get` and `roadmap_get` resolve them — see the [MCP Client Guide](/llms/mcp-client-guide.md).
+REST responses carry the `code` field on every entity. MCP tools are less complete: `research_create`, `research_import`, `research_get`, `entry_create`, `entry_list`, `entry_read`, `entry_patch`, `session_get`, the two `annotation_*` tools and the `roadmap_*` tools return codes, while section, question and task codes are only reachable through the REST API. Codes can be used in URLs instead of UUIDs (`/research/R1/entry/E2`), but only some tools resolve them as arguments — the [MCP Client Guide](/llms/mcp-client-guide.md) carries the list, and everything else wants the UUID.
 
 ## Cross-References
 
@@ -346,6 +353,7 @@ Use `[[...]]` syntax in entry content to create links between documents:
 3. If the target doesn't exist yet (e.g. `[[E5]]` before E5 is created), the reference is stored as unresolved
 4. Use `POST /api/researches/{id}/crossrefs/rebuild` to re-scan all entries and resolve stale references
 5. On server startup, codes are automatically backfilled for any records missing them
+6. If the target is **deleted**, the reference is not: the stored row is kept and marked unresolved, and the `[[R1:E5]]` stays in the citing document exactly as it was written. Nothing edits somebody else's text to hide that what it cited once existed, and a rebuild cannot repair it — there is nothing left to resolve to
 
 ### Viewing cross-references
 

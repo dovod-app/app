@@ -84,6 +84,16 @@ that conversation ends; work continues when you ask an assistant to resume it.
 - **Context for later work.** Private skills, memory, per-section writing
   instructions, reusable methodology, and a continuation summary that points
   to unfinished work.
+- **Archiving and deletion.** Archive a finished project to put it out of the
+  way and restore it later, or delete one outright — a project, a section, a
+  document, a session, or a question. Deletion is real: no trash and no restore
+  window, because a hidden copy of work you asked to be rid of is not data you
+  own. Deleting a project is the owner's decision, asks them to type its short
+  code, and offers a copy to download first; an assistant is instructed to
+  delete nothing you did not name, and needs an explicit confirmation to delete
+  a project at all. References from *other* projects keep the text that was
+  written and stop resolving — removing them would edit a project nobody asked
+  to change.
 
 ### Start with a methodology
 
@@ -351,8 +361,8 @@ Each account gets a personal team. Additional teams use these roles:
 | Role | Access |
 | --- | --- |
 | Viewer | Read and export |
-| Editor | Viewer access, plus creating and editing project content |
-| Owner | Editor access, plus managing members and moving projects between teams |
+| Editor | Viewer access, plus creating, editing, and deleting project content |
+| Owner | Editor access, plus managing members, moving projects between teams, and deleting the project itself |
 
 People join through invite links. For readers who do not need an account, use
 a revocable share link.

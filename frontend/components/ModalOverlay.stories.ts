@@ -10,6 +10,7 @@ const meta: Meta<typeof ModalOverlay> = {
     size: { control: 'select', options: ['sm', 'md', 'lg', 'xl'] },
     flush: { control: 'boolean' },
     labelledby: { control: 'text' },
+    initialFocus: { control: 'text' },
   },
   parameters: {
     docs: {
@@ -166,6 +167,29 @@ export const InitialFocus: Story = {
         <button type="button" class="btn btn-sm" style="margin-bottom: var(--space-3);">A button that comes first in the DOM</button>
         <label for="sb-confirm" style="display: block; font-size: var(--type-2xs); font-weight: 600;">Type R3 to confirm</label>
         <input id="sb-confirm" data-confirm-code class="form-input" style="max-width: 12ch; font-family: 'JetBrains Mono', monospace;" />
+      </ModalOverlay>
+    `,
+  }),
+}
+
+/**
+ * A selector that matches nothing — a control renamed, or a dialog that renders
+ * its field behind a `v-if` that is false on open.
+ *
+ * Focus falls back to the first focusable element, then to the card itself. It
+ * is a chain rather than a lookup for exactly this reason: the failure mode of
+ * "focus the named thing or nothing" is a dialog whose Escape key and Tab cycle
+ * are both dead, because focus never entered it at all.
+ */
+export const InitialFocusNotFound: Story = {
+  args: { visible: true, size: 'md', labelledby: 'modal-missing-title', initialFocus: '[data-nothing-here]' },
+  render: (args: any) => ({
+    components: { ModalOverlay },
+    setup() { return { args } },
+    template: `
+      <ModalOverlay v-bind="args">
+        <h2 id="modal-missing-title" style="margin: 0 0 var(--space-3); font-size: var(--type-md);">Nothing matches the selector</h2>
+        <button type="button" class="btn btn-sm">This first button takes focus instead</button>
       </ModalOverlay>
     `,
   }),

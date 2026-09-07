@@ -202,23 +202,27 @@ const deleteMessage = computed(() => {
   const head = q?.answer
     ? `${label} and the answer recorded for it are deleted.`
     : `${label} is deleted.`
-  const followUps = (q?.children?.length ?? 0) > 0 ? ' Its follow-up questions stay in the session.' : ''
-  return `${head}${followUps} This cannot be undone.`
+  // Said unconditionally. The payload carries no child list — domain.Question
+  // has no `children`, only the export shape does — so a branch on it was
+  // always false and the sentence never rendered. It is true of every question
+  // (questions.parent_id is ON DELETE SET NULL in all three dialects), and the
+  // reader deleting a parent is the one who needs it.
+  return `${head} Any follow-up questions asked under it stay in the session. This cannot be undone.`
 })
 
 async function deleteQuestion() {
   deleting.value = true
-  try {
-    const label = question.value?.code || 'The question'
-    await authFetch(`${rtBase}/api/questions/${question.value.id}`, { method: 'DELETE' })
-    confirmDelete.value = false
-    await navigateTo(`/research/${researchSlug.value}/session/${sessionId}`)
-    useToasts().push({ variant: 'success', title: 'Question deleted', message: `${label} has been removed.` })
-  } catch (e: any) {
-    useToasts().error(e?.data?.error ?? 'The server refused it.', 'Could not delete question')
-  } finally {
-    deleting.value = false
-  }
+  const outcome = await deleteEntity(
+    authFetch,
+    `${rtBase}/api/questions/${question.value.id}`,
+    'question',
+    useToasts(),
+    question.value?.code,
+  )
+  deleting.value = false
+  if (outcome === 'failed') return
+  confirmDelete.value = false
+  await navigateTo(`/research/${researchSlug.value}/session/${sessionId}`)
 }
 const answerFieldId = useId()
 
@@ -342,6 +346,10 @@ function refLink(ref: any): string {
 }
 .question-badges {
   display: flex;
+  /* Without this the flex line stretches every status pill to the height of the
+     Delete button beside them — 32px against the 22px the same pills are on
+     every other screen. The sibling session page already carries the rule. */
+  align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
 }

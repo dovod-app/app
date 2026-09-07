@@ -266,3 +266,68 @@ async function clickButton(root: HTMLElement, label: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
 }
+
+/**
+ * The confirmation, opened.
+ *
+ * The button does not delete: it raises `ConfirmModal`, whose message names the
+ * section and states the thing that makes this safe — it is empty, so nothing
+ * is filed under it. A one-click delete beside a field editor is a misclick
+ * waiting to happen, and the row above it is a row of editable inputs.
+ */
+export const DeleteConfirmation: Story = {
+  args: {
+    ...base,
+    researchSlug: 'R3',
+    onDelete: async () => {},
+    sections: [{ ...mockTopicSection, entries_count: 0 }],
+  },
+  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    await clickButton(canvasElement, 'Delete')
+  },
+}
+
+/**
+ * The delete in flight: the row's button reads "Deleting…" and is disabled, and
+ * the confirmation's own button reads "Wait...".
+ *
+ * Both, not either — the modal covers the card on a narrow screen and the card
+ * is what the reader looks back at when it closes, so a busy state on only one
+ * of them leaves half the surface claiming nothing is happening.
+ */
+export const DeleteInFlight: Story = {
+  args: {
+    ...base,
+    researchSlug: 'R3',
+    onDelete: () => neverResolves(),
+    sections: [{ ...mockTopicSection, entries_count: 0 }],
+  },
+  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    await clickButton(canvasElement, 'Delete')
+    await clickConfirm(canvasElement)
+  },
+}
+
+/**
+ * Presses the confirmation's own danger button.
+ *
+ * Scoped to `.confirm-actions` because the row's control and the modal's carry
+ * the same label — which is deliberate, a confirmation that renames the act is
+ * asking the reader to decide about a different thing.
+ *
+ * Searched from the document, not the canvas: `ConfirmModal` sits in a
+ * `<Teleport to="body">`, so a query rooted at `canvasElement` finds nothing,
+ * times out in silence, and leaves the story documenting the state before the
+ * click.
+ */
+async function clickConfirm(root: HTMLElement): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    const button = (root.ownerDocument ?? document).querySelector<HTMLElement>('.confirm-actions .btn-danger')
+    if (button) {
+      button.click()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}

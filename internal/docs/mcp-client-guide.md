@@ -1,6 +1,6 @@
 # MCP Client Guide
 
-Practical guide for AI assistants and MCP clients interacting with the Dovod server via MCP tools. Covers tool conventions, team roles and what they let you write, the kickoff templates and the skills index and when to read each, the queue of marks a reader left on the text and how far you may take one, content formatting, nullable fields, common pitfalls, and the difference between MCP and REST API access.
+Practical guide for AI assistants and MCP clients interacting with the Dovod server via MCP tools. Covers tool conventions, team roles and what they let you write, the kickoff templates and the skills index and when to read each, the queue of marks a reader left on the text and how far you may take one, content formatting, nullable fields, the destructive tools and the confirmation contract that governs them, common pitfalls, and the difference between MCP and REST API access.
 
 ## Two Ways to Interact
 
@@ -50,7 +50,7 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 Over **stdio** nothing is asked of you: the client starts the process, and the
 process is the boundary. Everything in this section is about the two transports
 that arrive over a socket, and **the credential is the same one for both** — the
-gate exists to protect the 52 tools, not a particular door, and a token that
+gate exists to protect the 57 tools, not a particular door, and a token that
 closes one and not the other is not a credential:
 
 - **Streamable HTTP** on the web port (`:8088` by default), which is what
@@ -162,6 +162,8 @@ answer from this API: that is the web UI, and a stale path used to return it.
 | `research_resume` | The outstanding work: tasks in progress, blocked and pending, the open and deferred questions of one session, the marks a person left, the documents changed most recently, and up to three candidate next actions each carrying its reason and whether it is yours or a person's. Read-only — no session is created, no status moves, nothing is marked as seen. It carries no `memory`, `field_spec` or skills index: `research_get` owns those, and the two are meant to be called in that order |
 | `research_list` | List every research you can reach, with optional status filter. Marks a shared one with `team` and a read-only one with `access: "read-only"` |
 | `research_update` | Update metadata or append one note with `add_memory` and optional `session_id` |
+| `research_delete_preview` | Counts what deleting this research would destroy, and which other researches cite it. Deletes nothing — read it before `research_delete` and tell the person the numbers |
+| `research_delete` | **Destroys the research and everything in it. Permanent, owner only, `confirm: true` required.** See [Deleting Is Permanent](#deleting-is-permanent) before you call it |
 | `research_memory` | List/add/edit/delete memory items by ID; edits require `version` |
 | `research_add_section` | Add a new section to an existing research |
 | `research_export` | Export a full research (sections, entries, sessions, questions, tasks, roadmaps). `format` defaults to `portable` (JSON for `research_import`); `format: "obsidian"` returns a link to download it as an Obsidian vault |
@@ -191,8 +193,10 @@ answer from this API: that is the web UI, and a stale path used to return it.
 | `session_create` | Create a Q&A session with initial questions |
 | `session_get` | Load session with all questions and progress |
 | `session_update` | Update title, focus, status, or notes |
+| `session_delete` | Delete a session and the questions asked in it. Documents written during it survive, with their session link cleared |
 | `question_create` | Add questions to an existing session |
 | `question_update` | Record answer, change question status |
+| `question_delete` | Delete one question. Follow-ups asked under it survive, with their parent link cleared |
 | `question_list` | List questions with filtering |
 
 ### Tasks
@@ -224,6 +228,7 @@ You do the work; they accept it. [Annotations](/llms/annotations.md).
 |------|---------|
 | `section_list` | List sections for a research, each with `spec_version` and — only when the section has one — its `instruction` (how to write a document here) and the `field_spec` its documents record |
 | `section_update` | Update section display name, description, status, position, `instruction` or `field_spec` (the slug `name` is immutable). The only way to set either: `research_create` and `research_add_section` take neither |
+| `section_delete` | Delete a section. **Refused while it still holds documents** — the refusal names how many — unless `force: true` deletes them with it |
 
 **Read the section's `instruction` before writing into it.** It is how *this*
 section is written — "Name the producing service. State the consumer. One
@@ -274,6 +279,89 @@ rule can live](/llms/skills.md), [Document Metadata](/llms/metadata.md).
 | `roadmap_update_node` | Update a single node — status, title, description, type, position, `stage`, `node_date`, `node_end_date` |
 | `roadmap_remove_nodes` | Remove nodes (edges auto-cascade) |
 
+## Deleting Is Permanent
+
+There is no trash, no tombstone and no restore. A delete removes rows; the only
+thing that brings the work back is writing it again. This is the one part of the
+tool surface where a plausible-sounding call is not recoverable, so it has its
+own rule:
+
+**Delete only what you were asked to delete, in those words.** "Tidy this up",
+"we don't need that any more" and "clean up the old sections" are requests to
+*ask which* — never instructions to delete. Where somebody wants a finished
+research out of the way, `research_update` with `status: "archived"` is
+reversible and is almost always what they meant; the same goes for
+`session_update` with `status: "completed"` and `question_update` with
+`status: "skipped"`, which keep the record of the work rather than removing it.
+
+The tools that destroy something: `research_delete`, `section_delete`,
+`session_delete`, `question_delete`, `entry_delete`, `task_delete`,
+`roadmap_delete`, `roadmap_remove_nodes` and `skill_delete` — plus
+`skill_detach`, which deletes a research-private skill because it exists nowhere
+else.
+
+### `research_delete`: the confirmation is the contract
+
+- **`confirm: true` is required.** It is a required, nullable boolean: `null` and
+  `false` both refuse, with a validation result telling you to ask first, and
+  nothing is deleted. Set it **only** when the person named this research and
+  asked for it to be gone. Never infer it from a sentence that merely sounded
+  like a tidy-up.
+- **Owner only.** An `editor` gets `your role in this team does not allow this`;
+  somebody with no access at all gets `not found`, because confirming the
+  research exists is itself information.
+- **Call `research_delete_preview` first and report what it says.** "Delete R7"
+  and "delete 4 sections, 12 documents and 3 sessions" are different decisions,
+  and the second one is the true one. The summary is
+  `{sections, entries, sessions, questions, tasks, roadmaps, annotations,
+  shares, incoming_refs, incoming_from}` — `incoming_from` names up to ten of the
+  researches that cite this one, by `code` and `name`.
+- **What goes with it**: sections, documents and every revision of them, sessions
+  and questions, tasks, roadmaps with their nodes and edges, annotations, the
+  research's memory, its share links (which stop working immediately) and the
+  methodologies attached to it — a research-private skill is destroyed, a team or
+  built-in skill only stops being followed.
+- **What does not go: references from other researches into this one.** A
+  `[[R1:E5]]` written in R2 stays in R2's text exactly as somebody wrote it and
+  stops resolving. Deleting those rows would edit a research nobody asked to
+  change. See [Cross-references](#cross-references).
+- The answer is `{deleted: true, destroyed: {…the same summary…}, unresolved_in:
+  [{code, name}]}`. Tell the person what went and which of their other researches
+  now carry dead references, rather than "done".
+
+### `section_delete`: `force` is the whole safety rail
+
+- Without `force`, a section holding documents is **refused**, and the refusal
+  names the count: `section is not empty: 3 document(s) would be deleted with
+  it` (a `409` over REST). Nothing is deleted.
+- `force: true` deletes the documents with it, along with the references and
+  external links they wrote. References *to* those documents from elsewhere
+  survive as text and stop resolving.
+- **There is no way to empty a section except by deleting its documents.** A
+  document cannot be moved between sections anywhere in this product — there is
+  no `entry_move`, and `entry_update` does not accept a `section_id`. So "empty
+  it first" is not the gentler path it sounds like; if the documents matter, keep
+  the section.
+- `force` is a required, nullable boolean like `confirm`: `null` means `false`.
+
+### `session_delete` and `question_delete`: what survives
+
+- **Documents written during a session survive** a `session_delete`, with their
+  `session_id` cleared. A finding is not an artefact of the conversation that
+  produced it. The session's questions do go, and so does everything they
+  recorded — the answers are the part that is lost.
+- **Follow-up questions survive** a `question_delete`, with their `parent_id`
+  cleared; they do not disappear with their parent.
+
+### Which ids these tools take
+
+`research_delete` and `research_delete_preview` resolve a UUID **or** an `R1`
+code, like the other research tools. `section_delete`, `session_delete` and
+`question_delete` take **UUIDs only** — an `SS4` reads as `not found` here even
+though `session_get` resolves it, and section codes are not returned by any tool
+at all. Get the UUID from `research_get` / `section_list` (sections),
+`session_get` or `research_resume` (sessions and questions) first.
+
 ## Access: You Can See More Than You Can Write
 
 `team_list` names the teams you belong to and your role in each. Pass a `team_id` to `research_create` (or `research_import`) to put new work where your colleagues can see it — without it every research lands in your personal team and someone has to move it by hand.
@@ -283,9 +371,9 @@ A research is owned by a **team**, and your role in that team decides what you m
 
 | Role | May do |
 |------|--------|
-| `viewer` | Every read tool (`*_get`, `*_list`, `*_read`, `entry_history`, `entry_diff`, `research_export`) |
-| `editor` | The above, plus every create/update/delete tool |
-| `owner` | The above, plus team management and moving a research to another team (REST only) |
+| `viewer` | Every read tool (`*_get`, `*_list`, `*_read`, `entry_history`, `entry_diff`, `research_export`, `research_delete_preview` — the preview is a read, so it can say what the delete you may not perform would take) |
+| `editor` | The above, plus every create/update/delete tool — including `section_delete`, `session_delete`, `question_delete` and `entry_delete` — but **not** `research_delete` |
+| `owner` | The above, plus `research_delete`, team management and moving a research to another team (REST only) |
 
 **How you find out, before you fail:**
 
@@ -297,7 +385,7 @@ A research is owned by a **team**, and your role in that team decides what you m
 
 | Text | Means | Do |
 |------|-------|----|
-| `your role in this team does not allow this` | You are in the team but only a `viewer` | Do not retry. Tell the user which research it was and that they need editor rights, or pick another research |
+| `your role in this team does not allow this` | You are in the team but only a `viewer` — or you are an `editor` and the call was `research_delete`, which only an `owner` may make | Do not retry. Tell the user which research it was and that they need editor rights, or pick another research |
 | `not found` | Either no such id, **or** it belongs to a team you are not in — the two are deliberately indistinguishable | Re-run `research_list` and use an id from it |
 
 `research_create` and `research_import` both take an optional `team_id`. Omit it and the research lands in your own personal team, so a research you created this session is always writable. Name a team and it goes there instead — you must be an `editor` or `owner` of it: a team you are not in is `not found`, one where you are only a `viewer` is refused. Use `team_list` to get the id; `research_create` echoes back `team` with the team's name when the research did not land in your personal one.
@@ -373,7 +461,7 @@ Read this before composing any tool call. Input schemas are generated from Go st
 | `"type": ["null", "string"]` / `["null","number"]` (pointer in Go) | send `null` | default value is used |
 | `"type": ["null", "array"]` (any list: `tags`, `statuses`, `questions`, `nodes`, `edges`, `node_ids`) | send `null` or `[]` | treated as empty |
 | `"type": ["null", "object"]` (`text_replace`, `metadata`) | send `null` | the value is left alone |
-| `"type": ["null", "boolean"]` (`allow_incomplete`) | send `null` | `false` |
+| `"type": ["null", "boolean"]` (`allow_incomplete`, `confirm`, `force`) | send `null` | `false` — which for `confirm` and `force` means the call is refused rather than performed |
 | `"type": "string"` / `"integer"` (plain scalar) | send `""` or `0` — **not** `null` | rejected: `null` is not a valid string/integer |
 
 Consequences:
@@ -384,6 +472,7 @@ Consequences:
 - **Two tools take no input at all**: `template_list` and `team_list`. Their schemas are empty objects — send `{}`.
 - **Never send `null` into a plain scalar.** The optional-but-not-nullable parameters are: `research_create` → `description`, `goal`; each `sections[]` item → `display_name`, `description`, `position`; `research_add_section` → `display_name`, `description`, `position`; each question item → `position`; `research_update` → `session_id`; `research_memory` → `text`, `item_id`, `version`, `session_id`.
 - **List filters are nullable**: `research_list.status`, `entry_list.status`, `question_list.status` / `area` / `priority`, `task_list.status` / `priority`, `annotation_list.status` / `kind` / `entry_id` / `limit` / `offset`. `null` or `""` means "no filter".
+- **The delete tools are in the ordinary regime too.** `research_delete` carries `research_id` (a plain string) and `confirm`; `section_delete` carries `section_id` and `force`; `session_delete` and `question_delete` carry one plain string each. Send every property. `confirm: null` and `force: null` are the same as `false`, and both are safe: the tool refuses and deletes nothing.
 - **The two annotation tools are in the ordinary regime**, not among the exceptions above: send every property. `annotation_list` carries one plain string (`research_id`) and five nullable filters, so the queue read is `research_id` plus five `null`s. `annotation_answer` carries two plain strings — `annotation_id` and `resolution`, neither of which may be `null` or empty — and one nullable `task_id`.
 - **`research_resume` is in the ordinary regime as well.** `research_id` is a plain string, and it does resolve an `R1` code; `session_id` and `limit` are nullable, so the ordinary call is the research plus two `null`s. `session_id: null` selects the one active session, or returns the candidates with `selection_required` when several are open — it never picks for you. `limit: null` is 5, and a number outside 1–15 is clamped rather than refused.
 - **`null` and empty are different for a replacing field.** `metadata` (`entry_update`), `field_spec` and `instruction` (`section_update`) are nullable but not "empty means empty": `null` leaves what is stored alone, while `{}` clears every value, `[]` removes every declared field and `""` removes the instruction. Send `null` unless you mean to erase.
@@ -404,6 +493,8 @@ Consequences:
 | `session_id` (entry) | The research's currently active session, if there is one |
 | `metadata` (`entry_create`) | No values recorded. `entry_update`: the stored values are left as they are |
 | `allow_incomplete` (`entry_update`) | `false` — completing a document with required fields unanswered is refused |
+| `confirm` (`research_delete`) | `false` — the call is refused and nothing is deleted. There is no default that deletes |
+| `force` (`section_delete`) | `false` — a section that still holds documents is refused, with the count in the message |
 | `field_spec` (`section_update`) | The section's declaration is left as it is |
 | `instruction` (`section_update`) | The section's writing instruction is left as it is. `""` removes it; over 500 characters the whole call is refused rather than truncated |
 | `limit` (`entry_history`) | `20` newest revisions; the result says `truncated: true` when more exist |
@@ -525,6 +616,16 @@ Only three sources are additionally **indexed** into the `crossrefs` table, and 
 | Task | `description` + `result` (on `task_update`) |
 
 Put references you want in the knowledge graph into entry content: the graph view draws an edge only for a resolved reference whose target is an entry, so `[[R2]]` and `[[RM1]]` are stored and clickable but never become graph edges. A reference to a target that does not exist yet is stored unresolved and can be fixed later with `POST /api/researches/{id}/crossrefs/rebuild`, which re-scans entry content only.
+
+**A reference into something that was deleted is not removed.** Deleting a
+research, or a section with `force`, clears the rows *its* documents wrote and
+marks every row pointing *at* them unresolved — but the rows stay, and so does
+the `[[R1:E5]]` in the citing document's own text. Nothing rewrites somebody
+else's document to hide that the thing it cited once existed. Two consequences
+for you: `GET /api/researches/{id}/crossrefs` will show those rows with
+`resolved: false` and no target, and `crossrefs/rebuild` will not repair them,
+because there is nothing left to resolve to. If you are asked to clean up after a
+deletion, edit the citing text yourself — and only if you were asked.
 
 ## Entry Types and Statuses
 
@@ -773,6 +874,25 @@ until the objection no longer applies destroys the disagreement instead of
 recording it; the mark stays open and the position it defended is gone. See
 [Annotations](/llms/annotations.md).
 
+### 12. Deleting because somebody said "tidy up"
+
+The delete tools have no undo, and the sentences that most often precede a
+mistaken call are the vague ones: "clean this up", "we don't need the old
+sections", "get rid of that". None of them names a record. Ask which, and prefer
+the reversible move — `archived` on a research, `completed` on a session,
+`skipped` on a question — unless the person asked for the thing to be **gone**.
+
+Two specific traps:
+
+- **`confirm: true` on `research_delete` is not a formality to satisfy.** It is
+  the one place the product asks whether a person actually said this. Setting it
+  because the schema wanted a value is the failure this guard exists for.
+- **`force: true` on `section_delete` is not "retry harder".** The refusal is
+  telling you how many documents would go. Report that number and wait for an
+  answer; do not re-send with `force` because the first call failed.
+
+See [Deleting Is Permanent](#deleting-is-permanent).
+
 ## Short Codes
 
 Every entity gets an auto-assigned short code on creation. These codes can be used in URLs and cross-references instead of UUIDs:
@@ -805,6 +925,6 @@ Where codes are accepted as tool input:
 
 | Accepts UUID **or** code | Accepts UUID only |
 |--------------------------|-------------------|
-| `research_get`, `research_update`, `research_memory`, `research_export`, `research_resume` (`research_id`), every `skill_*` tool (`research_id`), `session_get`, `research_resume`, `research_update` and `research_memory` (`session_id` — an `SS` code is resolved inside the research you named, and one from another research reads as `not found`), `roadmap_get` (`roadmap_id`) | every other tool — `research_id` in `entry_create` / `entry_list` / `section_list` / `session_create` / `task_create` / `task_list` / `roadmap_create` / `roadmap_list` / **`annotation_list`**, `entry_id`, `question_id`, `task_id`, `annotation_id`, `session_id` in `session_update`, `roadmap_id` in `roadmap_update` / `roadmap_delete` / `roadmap_add_nodes` / `roadmap_remove_nodes`, `node_id` |
+| `research_get`, `research_update`, `research_memory`, `research_export`, `research_resume`, `research_delete`, `research_delete_preview` (`research_id`), every `skill_*` tool (`research_id`), `session_get`, `research_resume`, `research_update` and `research_memory` (`session_id` — an `SS` code is resolved inside the research you named, and one from another research reads as `not found`), `roadmap_get` (`roadmap_id`) | every other tool — `research_id` in `entry_create` / `entry_list` / `section_list` / `session_create` / `task_create` / `task_list` / `roadmap_create` / `roadmap_list` / **`annotation_list`**, `entry_id`, `question_id`, `task_id`, `annotation_id`, `section_id` in `section_delete`, `session_id` in `session_update` and `session_delete`, `roadmap_id` in `roadmap_update` / `roadmap_delete` / `roadmap_add_nodes` / `roadmap_remove_nodes`, `node_id` |
 
-So keep the UUIDs returned by create calls. Short codes are for humans, URLs, and `[[...]]` cross-references — REST routes resolve them in `{id}` / `{sessionId}` / `{entryId}` / `{roadmapId}` path segments, MCP tools mostly do not.
+So keep the UUIDs returned by create calls. Short codes are for humans, URLs, and `[[...]]` cross-references — REST routes resolve them in `{id}` / `{sessionId}` / `{entryId}` / `{roadmapId}` path segments, MCP tools mostly do not. The exception on the REST side is the new delete routes: `DELETE /api/researches/{id}` takes an `R` code, but `DELETE /api/sections/{sectionId}`, `DELETE /api/sessions/{id}` and `DELETE /api/questions/{questionId}` want the UUID, exactly as their tools do.

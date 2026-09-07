@@ -92,6 +92,18 @@
       <NuxtLink class="btn" to="/teams">Your teams</NuxtLink>
     </EmptyState>
 
+    <!-- Empty because of the status filter. Deleting your last *active* project
+         while archived ones remain would otherwise land on "Start your first
+         project" — false, and said immediately after an irreversible act. -->
+    <EmptyState
+      v-else-if="statusFilter"
+      icon="&#x1F50D;"
+      :title="`No ${statusFilter} projects`"
+      description="Nothing matches this filter. Your other projects are still here."
+    >
+      <button class="btn" @click="statusFilter = ''">Show all statuses</button>
+    </EmptyState>
+
     <!-- Empty -->
     <EmptyState
       v-else
@@ -101,11 +113,16 @@
       command="Use the research/initialize prompt to start a new project in Dovod."
     />
 
+    <!-- Mounted always, opened by `visible`. With `v-if` the component mounted
+         with `visible` already true, and ModalOverlay's whole keyboard contract
+         lives in a watcher that is not `immediate`: no scroll lock, no captured
+         focus to restore, no initialFocus, and — because Escape and the Tab
+         trap are bound on the card — no Escape and no focus trap either, since
+         focus was still on the body. -->
     <ResearchDeleteResearchDialog
-      v-if="deleting"
       :visible="!!deleting"
-      :code="deleting.code || deleting.id"
-      :name="deleting.name"
+      :code="deleting?.code || deleting?.id || ''"
+      :name="deleting?.name || ''"
       :summary="del.summary.value"
       :loading="del.loading.value"
       :summary-failed="del.summaryFailed.value"
@@ -229,7 +246,9 @@ async function confirmDelete() {
   // the page already renders.
   await refreshList()
   if (outcome === 'already-gone') {
-    listToasts.push({ variant: 'info', title: 'Already deleted', message: `“${target.name}” had already been removed.` })
+    // Neutral: a 404 also means the caller lost access, and the project
+    // may be alive and in use.
+    listToasts.push({ variant: 'info', title: 'No longer available', message: `“${target.name}” is no longer available here.` })
   } else {
     listToasts.push({ variant: 'success', title: 'Project deleted', message: `“${target.name}” and everything in it has been removed.` })
   }
