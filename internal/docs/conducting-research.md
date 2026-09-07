@@ -343,8 +343,8 @@ Use `[[...]]` syntax in entry content to create links between documents:
 
 1. When an entry is created or updated, the server parses all `[[...]]` patterns from the content
 2. Each reference is resolved to a target entry/research UUID and stored in the `crossrefs` table
-3. If the target doesn't exist yet (e.g. `[[E5]]` before E5 is created), the reference is stored as unresolved
-4. Use `POST /api/researches/{id}/crossrefs/rebuild` to re-scan all entries and resolve stale references
+3. If the target doesn't exist yet (e.g. `[[E5]]` before E5 is created), the reference is stored unresolved — **and repairs itself the moment E5 is created**. Creating an entry, task, roadmap, node or research points every reference that was waiting on that code at it, so write in whatever order the argument runs in
+4. A reference still unresolved once its target exists is a typo or a deleted target, not a timing problem. `crossref_rebuild` re-scans a whole research — documents, task results and question answers — as a last resort: after a restore, or a code backfill
 5. On server startup, codes are automatically backfilled for any records missing them
 
 ### Viewing cross-references
@@ -357,7 +357,6 @@ Use `[[...]]` syntax in entry content to create links between documents:
 
 - Reference foundational entries from higher-level ones: "See [[E1]] for goroutine basics"
 - Use cross-research references when topics span projects: "Compare with [[R2:E3]]"
-- After creating entries that are referenced by earlier entries, run rebuild to resolve forward references
 - Keep entries self-contained — cross-references add context but each entry should be readable alone
 
 ## Best Practices
@@ -372,7 +371,7 @@ Use `[[...]]` syntax in entry content to create links between documents:
 - Keep session notes updated for context across sessions
 - Use tasks to plan and track remaining work
 - Use `[[E1]]` cross-references to build connections between related entries
-- Run crossref rebuild after batch-creating entries to resolve forward references
+- Write `[[E5]]` before E5 exists when the argument calls for it — the reference resolves itself when E5 is created, so there is no ordering to plan and no rebuild to run
 - Create roadmaps when the research reveals step-by-step processes, learning paths, or decision trees
 - Build the full roadmap graph in one `roadmap_create` call rather than adding nodes one at a time
 - Choose roadmap statuses that match the domain vocabulary (learning, marketing, engineering, etc.)

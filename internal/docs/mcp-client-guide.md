@@ -50,7 +50,7 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 Over **stdio** nothing is asked of you: the client starts the process, and the
 process is the boundary. Everything in this section is about the two transports
 that arrive over a socket, and **the credential is the same one for both** — the
-gate exists to protect the 52 tools, not a particular door, and a token that
+gate exists to protect the 53 tools, not a particular door, and a token that
 closes one and not the other is not a credential:
 
 - **Streamable HTTP** on the web port (`:8088` by default), which is what
@@ -179,6 +179,7 @@ answer from this API: that is the web UI, and a stale path used to return it.
 | `entry_delete` | Delete an entry (also removes its cross-references and external links) |
 | `entry_history` | List an entry's revisions: who wrote each one (agent, human, import, restore), in which session, and what it changed. Read it before rewriting an entry another session wrote |
 | `entry_diff` | Unified diff between two revisions; with no numbers, the most recent change. Block documents are compared as markdown, not JSON |
+| `crossref_rebuild` | Re-scan a research's `[[...]]` index — documents, task results and question answers — and report `sources`, `references`, `unresolved`. **Rarely needed**: a reference written before its target is repaired when the target is created. For a restore, backfilled codes, or a code reused after a delete |
 
 **Taking one document out is not a tool.** A document can be downloaded as a markdown file with YAML front matter — `GET /api/entries/{id}/markdown`, or the **Download .md** item in the `⋯` menu on an entry page — and no MCP tool does it: you already have the content from `entry_read`, and putting a file on someone's disk is a human act. If a user asks for one, point them at the entry page. The file carries no provenance and does not rewrite `[[E3]]` for a foreign vault. [Export](/llms/export.md).
 
@@ -524,7 +525,7 @@ Only three sources are additionally **indexed** into the `crossrefs` table, and 
 | Question | `answer` (on `question_update`) |
 | Task | `description` + `result` (on `task_update`) |
 
-Put references you want in the knowledge graph into entry content: the graph view draws an edge only for a resolved reference whose target is an entry, so `[[R2]]` and `[[RM1]]` are stored and clickable but never become graph edges. A reference to a target that does not exist yet is stored unresolved and can be fixed later with `POST /api/researches/{id}/crossrefs/rebuild`, which re-scans entry content only.
+Put references you want in the knowledge graph into entry content: the graph view draws an edge only for a resolved reference whose target is an entry, so `[[R2]]` and `[[RM1]]` are stored and clickable but never become graph edges. **Write references forward without ceremony.** A reference to something that does not exist yet is stored unresolved and repaired the moment you create it — the entry, the task, the roadmap, the node, the research. There is no ordering to plan and no rebuild to run afterwards. `crossref_rebuild` exists for what nothing can hook (a restore, backfilled codes, a code reused after a delete) and re-scans documents, task results and question answers; if it reports `unresolved > 0`, that is a typo or a deleted target, and running it again will not change the number.
 
 ## Entry Types and Statuses
 

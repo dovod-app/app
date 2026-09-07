@@ -31,8 +31,12 @@ type TaskService struct {
 	researches *storage.ResearchRepository
 	access     *Access
 	crossrefs  CrossRefParser
-	events     EventNotifier
-	log        *slog.Logger
+	// dangling repairs references that named this task's code before it
+	// existed. Optional: nil is the old behaviour, which is what the narrower
+	// tests construct.
+	dangling DanglingResolver
+	events   EventNotifier
+	log      *slog.Logger
 }
 
 func NewTaskService(tasks *storage.TaskRepository, researches *storage.ResearchRepository, access *Access, crossrefs CrossRefParser, events EventNotifier, log *slog.Logger) *TaskService {
@@ -62,6 +66,15 @@ func (s *TaskService) Create(ctx context.Context, req CreateTaskRequest) (*domai
 		return nil, fmt.Errorf("create task: %w", err)
 	}
 
+	// A task created with a description that cites something had no reference
+	// row until its first edit, because only Update parsed. The rebuild found
+	// them, so the row appeared and vanished depending on which ran last.
+	if s.crossrefs != nil {
+		s.crossrefs.ParseCrossRefs(ctx, "task", task.ID, task.ResearchID, taskIndexText(task))
+	}
+	if s.dangling != nil {
+		s.dangling.ResolveDanglingTask(ctx, task.ResearchID, task.Code)
+	}
 	emit(ctx, s.events, Event{Type: "task.created", ResearchID: task.ResearchID, EntityID: task.ID, Entity: "task"})
 	return task, nil
 }
@@ -128,8 +141,7 @@ func (s *TaskService) Update(ctx context.Context, id string, req UpdateTaskReque
 
 	// Parse crossrefs from result and description
 	if s.crossrefs != nil {
-		text := task.Description + "\n" + task.Result
-		s.crossrefs.ParseCrossRefs(ctx, "task", task.ID, task.ResearchID, text)
+		s.crossrefs.ParseCrossRefs(ctx, "task", task.ID, task.ResearchID, taskIndexText(task))
 	}
 
 	emit(ctx, s.events, Event{Type: "task.updated", ResearchID: task.ResearchID, EntityID: task.ID, Entity: "task"})
@@ -157,3 +169,11 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 func (s *TaskService) CountByStatus(ctx context.Context, researchID string) (map[domain.TaskStatus]int, error) {
 	return s.tasks.CountByStatus(ctx, researchID)
 }
+
+// SetDanglingResolver supplies the reference table so that creating a task
+// repairs the references that already named its code.
+//
+// Set after construction rather than taken as a parameter because EntryService
+// owns the reference table and is built after this one — the same reason
+// EntryService.SetRoadmapRepos exists.
+func (s *TaskService) SetDanglingResolver(r DanglingResolver) { s.dangling = r }

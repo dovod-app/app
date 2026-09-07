@@ -62,6 +62,9 @@ type ResearchService struct {
 	access     *Access
 	events     EventNotifier
 	log        *slog.Logger
+	// dangling repairs references that named this research's code before it
+	// existed. Optional, set after construction.
+	dangling DanglingResolver
 }
 
 func NewResearchService(researches *storage.ResearchRepository, sections *storage.SectionRepository, teams *storage.TeamRepository, access *Access, events EventNotifier, log *slog.Logger) *ResearchService {
@@ -117,6 +120,9 @@ func (s *ResearchService) Create(ctx context.Context, req CreateResearchRequest)
 	}
 
 	s.decorate(ctx, research)
+	if s.dangling != nil {
+		s.dangling.ResolveDanglingResearch(ctx, research.ID, research.Code)
+	}
 	emit(ctx, s.events, Event{Type: "research.created", ResearchID: research.ID, EntityID: research.ID, Entity: "research"})
 	return research, sections, nil
 }
@@ -430,3 +436,11 @@ func specVersionFor(specs []domain.FieldSpec) int {
 	}
 	return 1
 }
+
+// SetDanglingResolver supplies the reference table so that creating a research
+// repairs the references that already named its code.
+//
+// Set after construction rather than taken as a parameter because EntryService
+// owns the reference table and is built after this one — the same reason
+// EntryService.SetRoadmapRepos exists.
+func (s *ResearchService) SetDanglingResolver(r DanglingResolver) { s.dangling = r }

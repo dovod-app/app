@@ -1251,3 +1251,56 @@ func TestAccessControl_Roadmap(t *testing.T) {
 		t.Errorf("Alice's roadmap was changed by refused calls: %+v", got)
 	}
 }
+
+// An unresolved cross-research reference must say nothing about the research it
+// named — not even whether it exists.
+//
+// `[[R2:E50]]` used to store R2's uuid the moment the research code resolved,
+// whether or not E50 did. The row then answered "is there an R2" in two states,
+// null versus a uuid, to anyone holding the source. Writing [[R1:E1]],
+// [[R2:E1]], … and reading the rows back enumerated other tenants' researches
+// without a single link ever resolving — the id-harvesting VisibleCrossRefs
+// exists to prevent, arriving by the back door.
+func TestAccessControl_UnresolvedCrossResearchRefNamesNoResearch(t *testing.T) {
+	k := newForwardKit(t)
+	alice, bob := setupTwoUsers(t, k.db)
+	ctxA, ctxB := userCtx(alice), userCtx(bob)
+
+	aid, asid := k.research1(t, ctxA, "Alice's research")
+	bid, _ := k.research1(t, ctxB, "Bob's research")
+	bobResearch, err := k.research.Get(ctxB, bid)
+	if err != nil {
+		t.Fatalf("read Bob's research: %v", err)
+	}
+
+	// One reference into a research that exists but has no E50, and one into a
+	// research code that does not exist at all. The rows must be identical.
+	real := bobResearch.Code + ":E50"
+	fake := "R9999:E50"
+	src := k.citing(t, ctxA, aid, asid, "Compare [["+real+"]] with [["+fake+"]].", real)
+
+	for _, ref := range []string{real, fake} {
+		entryID, researchID, roadmapID, nodeID := k.refRow(t, ctxA, aid, src, ref)
+		if entryID != "" || researchID != "" || roadmapID != "" || nodeID != "" {
+			t.Errorf("stored row for [[%s]] carries a target: entry=%q research=%q roadmap=%q node=%q",
+				ref, entryID, researchID, roadmapID, nodeID)
+		}
+	}
+
+	// And the read path blanks whatever is already in the table, since the rows
+	// written before this rule still hold Bob's id.
+	if _, err := k.db.ExecContext(ctxA,
+		`UPDATE crossrefs SET target_research_id = ? WHERE source_research_id = ? AND target_ref = ?`,
+		bid, aid, real); err != nil {
+		t.Fatalf("seed a legacy row: %v", err)
+	}
+	stored, err := k.crossrefs.FindByResearch(ctxA, aid)
+	if err != nil {
+		t.Fatalf("list crossrefs: %v", err)
+	}
+	for _, ref := range testAccess(k.db).VisibleCrossRefs(ctxA, stored) {
+		if ref.TargetRef == real && ref.TargetResearchID != "" {
+			t.Errorf("an unresolved [[%s]] read back carrying %s — Bob's research id", real, ref.TargetResearchID)
+		}
+	}
+}

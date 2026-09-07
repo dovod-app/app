@@ -17,7 +17,7 @@
         v-for="sk in skills"
         :id="`skill-row-${sk.slug}`"
         :key="sk.id || sk.slug"
-        :class="['data-row', 'skill-row', { 'data-row--busy': busySlug === sk.slug }]"
+        :class="['data-row', 'data-row--split', { 'data-row--busy': busySlug === sk.slug }]"
         :aria-busy="busySlug === sk.slug || undefined"
       >
         <div class="skill-main">
@@ -101,18 +101,6 @@ const emit = defineEmits<{
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
-.group-blurb {
-  font-size: var(--type-xs);
-  color: var(--color-text-muted);
-  max-width: var(--measure-prose);
-}
-
-.skill-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
 .skill-main { min-width: 0; }
 .skill-head {
   display: flex;
@@ -159,7 +147,6 @@ const emit = defineEmits<{
 }
 
 @media (max-width: 768px) {
-  .skill-row { flex-direction: column; align-items: stretch; }
   .skill-actions { justify-content: flex-end; }
 }
 </style>
