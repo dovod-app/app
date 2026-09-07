@@ -65,7 +65,7 @@ func newOAuthServer(t *testing.T) *oauthServer {
 	externalLinkRepo := storage.NewExternalLinkRepository(db)
 	oauthRepo := storage.NewOAuthRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, true)
 	hub := ws.NewHub(log)
 	events := service.NoopNotifier{}
 
@@ -83,7 +83,7 @@ func newOAuthServer(t *testing.T) *oauthServer {
 	obsidianSvc := service.NewObsidianService(researchSvc, sectionSvc, entryRepo, sessionSvc, taskSvc, roadmapSvc,
 		storage.NewEntryRevisionRepository(db), log)
 	teamSvc := service.NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db),
-		researchRepo, events, log)
+		researchRepo, access, events, log)
 	shareSvc := service.NewShareService(storage.NewShareRepository(db), access, events, log)
 	skillSvc := service.NewSkillService(storage.NewSkillRepository(db), researchRepo, teamRepo, access, events, log)
 	templateSvc := service.NewTemplateService(storage.NewTemplateRepository(db), storage.NewSkillRepository(db),

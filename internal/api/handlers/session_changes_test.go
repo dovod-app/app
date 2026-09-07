@@ -40,7 +40,7 @@ func TestSessionChanges_SummaryAndScope(t *testing.T) {
 	entryRepo := storage.NewEntryRepository(db)
 	sessionRepo := storage.NewSessionRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, false)
 	researchSvc := service.NewResearchService(researchRepo, sectionRepo, teamRepo, access, nopNotifier{}, log)
 	entrySvc := service.NewEntryService(entryRepo, sectionRepo, researchRepo, access, sessionRepo,
 		storage.NewBlockRepository(db), storage.NewEntryRevisionRepository(db),

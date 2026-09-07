@@ -25,7 +25,7 @@ func TestResearchMemory_MCPContract(t *testing.T) {
 	defer db.Close()
 	repo := storage.NewResearchRepository(db)
 	team := storage.NewTeamRepository(db)
-	svc := service.NewResearchService(repo, storage.NewSectionRepository(db), team, service.NewAccess(team), service.NoopNotifier{}, slog.Default())
+	svc := service.NewResearchService(repo, storage.NewSectionRepository(db), team, service.NewAccess(team, false), service.NoopNotifier{}, slog.Default())
 	r, _, err := svc.Create(ctx, service.CreateResearchRequest{Name: "MCP memory"})
 	if err != nil {
 		t.Fatal(err)

@@ -20,10 +20,14 @@ import (
 //
 // Two rules hold across every method:
 //
-//   - **Nobody in the context means no check.** That is the local
-//     single-binary case (`auth_enabled: false`), where there are no users to
-//     be wrong about. It is the behaviour this product has always had; turning
-//     auth on is what takes it away.
+//   - **Nobody in the context means no check — only when accounts are off.**
+//     That is the local single-binary case (`auth_enabled: false`), where
+//     there are no users to be wrong about. With `auth_enabled: true` an
+//     anonymous caller is a stranger and gets ErrNotFound, whatever transport
+//     they arrived on. The rule used to be about the caller alone, and stdio
+//     does not authenticate: `RunStdio` with accounts on and no
+//     `--default-user` put nobody in the context, met this rule, and handed
+//     every tool owner rights over every research in the database.
 //   - **A non-member gets ErrNotFound, never a refusal.** Confirming that a
 //     research exists is itself information about someone else's work. A
 //     member who merely lacks the right gets ErrForbidden, because hiding a
@@ -34,11 +38,25 @@ import (
 // and TeamService.requireRole makes it.
 type Access struct {
 	teams *storage.TeamRepository
+
+	// accountsEnabled mirrors `auth_enabled`. It is a constructor argument and
+	// not a setter on purpose: it decides whether an anonymous caller is
+	// everyone or nobody, and a binary that forgets to set it afterwards would
+	// be the permissive one.
+	accountsEnabled bool
 }
 
-func NewAccess(teams *storage.TeamRepository) *Access {
-	return &Access{teams: teams}
+// NewAccess builds the guard. accountsEnabled is `auth_enabled` — pass it from
+// the same config value the API server and the WebSocket hub are given, or an
+// anonymous caller means one thing to this guard and another to them.
+func NewAccess(teams *storage.TeamRepository, accountsEnabled bool) *Access {
+	return &Access{teams: teams, accountsEnabled: accountsEnabled}
 }
+
+// AccountsEnabled reports whether this instance has user accounts, so a caller
+// that has to branch on it can ask the guard rather than carry a second copy of
+// the flag that could disagree with this one.
+func (a *Access) AccountsEnabled() bool { return a.accountsEnabled }
 
 // Read allows any member of the owning team.
 func (a *Access) Read(ctx context.Context, researchID string) error {
@@ -96,7 +114,8 @@ func (a *Access) Admin(ctx context.Context, researchID string) error {
 
 // Role resolves the caller's role, or ErrNotFound when the research is absent
 // or belongs to a team they are not in. An empty role with a nil error means
-// there is no authenticated caller at all.
+// there is no authenticated caller at all, which only happens when accounts
+// are off.
 //
 // Existence is checked even then. "No check" is about permission, not about
 // whether the thing is there: without this, a bad id in local mode would slip
@@ -156,6 +175,15 @@ func (a *Access) roleFor(ctx context.Context, uid, researchID string) (domain.Te
 		return "", ErrNotFound
 	}
 	if uid == "" {
+		// With accounts on there is no such thing as a caller who is exempt.
+		// The one transport that authenticates nobody is stdio, and it is the
+		// one where being wrong is worst: it holds the same tools as the HTTP
+		// API and nothing in front of it. ErrNotFound rather than ErrForbidden
+		// for the reason every non-member gets it — that a research exists is
+		// itself information.
+		if a.accountsEnabled {
+			return "", ErrNotFound
+		}
 		return "", nil
 	}
 	// The local team holds researches created with no user at all, and it has

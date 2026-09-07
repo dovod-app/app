@@ -72,8 +72,15 @@
         </div>
       </div>
 
-      <!-- Owner only, and absent rather than disabled: TeamViewerNotice at the
-           top of the page already explains missing controls once. -->
+      <!-- Removed for a viewer rather than disabled: the house rule, and the
+           route behind it is a write. There is no share twin of this page, so
+           "never on a share" is true by construction rather than by a guard. -->
+      <ResearchSettingsMaintenanceCard v-if="canWrite" :research-id="id" />
+
+      <!-- Last on the page, and after maintenance: everything above repairs the
+           project, this one ends it. Owner only, and absent rather than
+           disabled — TeamViewerNotice at the top already explains missing
+           controls once. -->
       <DangerZone v-if="canAdmin" lead="Deleting a project cannot be undone.">
         <DangerRow
           label="Delete project"

@@ -809,9 +809,21 @@ func NewServer(
 	crReadHandler := handlers.NewCrossRefHandler(crossrefRepo, entrySvc, researchSvc, access, log)
 	crReadHandler.SetRoadmapService(roadmapSvc)
 	rt.route(accessRead, op("GET", "/api/researches/{id}/crossrefs", "List cross-references",
-		"Every `[[...]]` reference found in the research, as a graph of what points at what. Extracted on write; `POST .../crossrefs/rebuild` re-scans when they have gone stale.").
+		"Every `[[...]]` reference found in the research, as a graph of what points at what. Extracted on write, and repaired when a reference's target is created after it. `summary` carries the health of the index — the total, how many still point at nothing, and the first few codes that do. `POST .../crossrefs/rebuild` re-scans when they have gone stale.").
 		tag("Cross-references").
-		returns("200", "The references in this research.", list(sCrossRef)).
+		returns("200", "The references in this research, with a summary of how many resolve.", envelope(map[string]*huma.Schema{
+			"data":  {Type: "array", Items: sCrossRef},
+			"count": {Type: "integer"},
+			"summary": {Type: "object", Properties: map[string]*huma.Schema{
+				"total":      {Type: "integer"},
+				"unresolved": {Type: "integer"},
+				// `dangling` is capped; `dangling_total` says how many distinct
+				// codes there really are, so a client can say "and more" without
+				// inventing a number from the row count.
+				"dangling":       {Type: "array", Items: &huma.Schema{Type: "string"}},
+				"dangling_total": {Type: "integer"},
+			}},
+		})).
 		build(), crReadHandler.ListForResearch)
 
 	rt.route(accessRead, op("GET", "/api/entries/{id}/crossrefs", "One document's cross-references",
@@ -1275,9 +1287,14 @@ func NewServer(
 		build(), rmh.UpdateNode)
 
 	rt.route(accessWrite, op("POST", "/api/researches/{id}/crossrefs/rebuild", "Rebuild cross-references",
-		"Re-scans every document in the research and rewrites the reference table. What to run when references have gone stale — after an import, or after codes were backfilled.").
+		"Re-scans every source in the research — documents, task results and question answers — and rewrites the reference table. A last resort: a reference written before its target existed is repaired the moment the target is created. Run this after an import, after a restore, or after codes were backfilled onto records that predate them.").
 		tag("Cross-references").
-		returns("200", "How many references were found.", envelope(map[string]*huma.Schema{
+		returns("200", "What the rebuild found. `unresolved` is the number worth acting on: after the create-time repair, one of those is a typo or a deleted target rather than a timing race.", envelope(map[string]*huma.Schema{
+			"sources":    {Type: "integer"},
+			"references": {Type: "integer"},
+			"unresolved": {Type: "integer"},
+			// Kept because it has been in this response since the route existed;
+			// it now equals `references`, which is what its name always claimed.
 			"rebuilt": {Type: "integer"},
 			"status":  {Type: "string"},
 		})).

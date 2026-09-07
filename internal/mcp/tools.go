@@ -29,6 +29,9 @@ func (s *Server) registerTools() {
 	tools.RegisterEntryRead(s.server, s.entry, s.log)
 	tools.RegisterEntryPatch(s.server, s.entry, s.log)
 	tools.RegisterEntryHistory(s.server, s.entry, s.log)
+	// The repair had a REST route, no button and no tool, so the one caller who
+	// could have run it — the agent that wrote the references — could not.
+	tools.RegisterCrossRefRebuild(s.server, s.entry, s.log)
 	tools.RegisterEntryDiff(s.server, s.entry, s.log)
 	tools.RegisterEntryUpdate(s.server, s.entry, s.log)
 	tools.RegisterEntryDelete(s.server, s.entry, s.log)

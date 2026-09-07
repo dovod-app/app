@@ -556,6 +556,12 @@ func (s *TemplateService) callerScope(ctx context.Context) (storage.TemplateScop
 	}
 	uid := auth.UserIDFromContext(ctx)
 	if uid == "" {
+		if s.access.AccountsEnabled() {
+			// With accounts on, an unauthenticated caller is a stranger rather
+			// than the owner of the instance, and gets what the operator token
+			// gets: the global tier and nothing any team wrote.
+			return storage.TemplateScope{}, nil
+		}
 		// Local mode: there are no memberships to enumerate, so listing the
 		// caller's teams returns nothing and a template written on that
 		// instance would be invisible to whoever wrote it. Nobody to scope to
@@ -651,6 +657,9 @@ func (s *TemplateService) teamCheck(ctx context.Context, teamID string, write bo
 	}
 	uid := auth.UserIDFromContext(ctx)
 	if uid == "" {
+		if s.access.AccountsEnabled() {
+			return ErrNotFound
+		}
 		return nil
 	}
 	role, ok, err := s.teams.FindRole(ctx, teamID, uid)

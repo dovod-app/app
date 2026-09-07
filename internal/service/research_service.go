@@ -62,6 +62,9 @@ type ResearchService struct {
 	access     *Access
 	events     EventNotifier
 	log        *slog.Logger
+	// dangling repairs references that named this research's code before it
+	// existed. Optional, set after construction.
+	dangling DanglingResolver
 }
 
 func NewResearchService(researches *storage.ResearchRepository, sections *storage.SectionRepository, teams *storage.TeamRepository, access *Access, events EventNotifier, log *slog.Logger) *ResearchService {
@@ -117,6 +120,9 @@ func (s *ResearchService) Create(ctx context.Context, req CreateResearchRequest)
 	}
 
 	s.decorate(ctx, research)
+	if s.dangling != nil {
+		s.dangling.ResolveDanglingResearch(ctx, research.ID, research.Code)
+	}
 	emit(ctx, s.events, Event{Type: "research.created", ResearchID: research.ID, EntityID: research.ID, Entity: "research"})
 	return research, sections, nil
 }
@@ -129,6 +135,20 @@ func (s *ResearchService) Create(ctx context.Context, req CreateResearchRequest)
 func (s *ResearchService) resolveCreateTeam(ctx context.Context, requested string) (string, error) {
 	uid := auth.UserIDFromContext(ctx)
 	if uid == "" {
+		if s.access.AccountsEnabled() {
+			// An instance with accounts has no anonymous author. Letting the
+			// research through would file it in the local team, where the
+			// person who asked for it could not read it back.
+			//
+			// Its own sentence rather than bare ErrNoAuth, whose text is "sign
+			// in to manage teams": the only caller who can reach this is a
+			// stdio session that asked to create a project and mentioned no
+			// team, and a refusal naming an entity it never mentioned sends the
+			// reader looking in the wrong place.
+			return "", noAuthf("this session is not signed in, so there is no account to file the project under. " +
+				"The server was started with accounts enabled: a stdio session needs --default-user " +
+				"(or MCP_RESEARCH_DEFAULT_USER) naming the account it should act as")
+		}
 		// Local mode: no users, one team, everything in it.
 		return domain.LocalTeamID, nil
 	}
@@ -257,6 +277,15 @@ func (s *ResearchService) List(ctx context.Context, filter storage.ResearchFilte
 	}
 
 	uid := auth.UserIDFromContext(ctx)
+	if uid == "" && s.access.AccountsEnabled() {
+		// Same reason as the share above, and the same shape of mistake: with
+		// accounts on there is nobody to scope by, so the filter would be left
+		// unset and the answer would be every research on the server. The
+		// caller who reaches here is an anonymous stdio session — the one
+		// transport that authenticates nobody — and it sees what any stranger
+		// sees, which is nothing.
+		return []*domain.Research{}, nil
+	}
 	if uid != "" {
 		filter.MemberOf = &uid
 	}
@@ -430,3 +459,11 @@ func specVersionFor(specs []domain.FieldSpec) int {
 	}
 	return 1
 }
+
+// SetDanglingResolver supplies the reference table so that creating a research
+// repairs the references that already named its code.
+//
+// Set after construction rather than taken as a parameter because EntryService
+// owns the reference table and is built after this one — the same reason
+// EntryService.SetRoadmapRepos exists.
+func (s *ResearchService) SetDanglingResolver(r DanglingResolver) { s.dangling = r }

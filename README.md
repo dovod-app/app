@@ -73,7 +73,10 @@ that conversation ends; work continues when you ask an assistant to resume it.
 - **Documents and evidence.** Markdown and structured blocks, tables,
   checklists, transcripts, Mermaid diagrams, and sandboxed HTML artifacts.
   Cross-references such as `[[E3]]` connect documents; `[[R2:E5]]` links across
-  projects.
+  projects. A reference written before its target exists — the usual order,
+  since the assistant names a document before writing it — connects itself when
+  that document, task, or roadmap is created, so the knowledge graph shows the
+  same links the text does.
 - **Questions and answers.** Interview sessions with follow-up questions,
   deferred answers, and a visible record of what remains open.
 - **Review and history.** Marks on specific passages, the assistant's
@@ -264,6 +267,13 @@ local account if needed, runs stdio tools as that user, and signs the browser
 in automatically. Use this mode on a trusted local machine. Give each running
 instance its own web port with `--web-port` if another server is using 8088.
 
+`--default-user` is **required** alongside `--auth-enabled` here. Nothing
+authenticates a stdio session — the client starts the process and speaks a pipe
+— so without it the session is nobody, and on a server with accounts nobody is
+a stranger: every tool answers "not found" and the project list comes back
+empty. The server says so at startup. The web UI on the web port is unaffected;
+you sign in there as usual.
+
 Once connected, use the example [start prompt](#how-it-works) or copy one from
 **Methodologies** in the browser.
 
@@ -285,7 +295,7 @@ for a server configuration.
 | JWT signing secret | `--jwt-secret` | `MCP_RESEARCH_JWT_SECRET` | Generated on startup |
 | Registration | `--allow-registration` | `MCP_RESEARCH_ALLOW_REGISTRATION` | `true` |
 | Public URL | `--base-url` | `MCP_RESEARCH_BASE_URL` | — |
-| Local default user | `--default-user` | `MCP_RESEARCH_DEFAULT_USER` | — |
+| Local default user | `--default-user` | `MCP_RESEARCH_DEFAULT_USER` | — (required with `--auth-enabled` on stdio) |
 | Operator API token | `--api-token` | `MCP_RESEARCH_API_TOKEN` | None — writes only from the server's own machine |
 | Revision retention limit | `--revision-limit` | `MCP_RESEARCH_REVISION_LIMIT` | `0` — keep all |
 | Log level | `--log-level` | `MCP_RESEARCH_LOG_LEVEL` | `info` |
@@ -387,7 +397,9 @@ The API reference describes which credential each route accepts.
 The same guides are available in this repository:
 
 - [MCP client guide and tools](internal/docs/mcp-client-guide.md)
-- [Project data model](internal/docs/domain-guide.md)
+- [Conducting a project](internal/docs/conducting-research.md) and the
+  [project data model](internal/docs/domain-guide.md)
+- [Document metadata](internal/docs/metadata.md)
 - [Review marks](internal/docs/annotations.md) and [revision history](internal/docs/revisions.md)
 - [Block documents](internal/docs/blocks.md) and [HTML artifacts](internal/docs/artifacts.md)
 - [Tasks](internal/docs/tasks.md), [roadmaps](internal/docs/roadmaps.md), and [exports](internal/docs/export.md)

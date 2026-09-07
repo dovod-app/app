@@ -92,6 +92,9 @@ type RoadmapService struct {
 	sessions  *storage.SessionRepository
 	questions *storage.QuestionRepository
 	sections  *storage.SectionRepository
+	// dangling repairs references that named a roadmap or node code before it
+	// existed. Optional, set after construction.
+	dangling DanglingResolver
 }
 
 func NewRoadmapService(
@@ -171,6 +174,8 @@ func (s *RoadmapService) Create(ctx context.Context, req CreateRoadmapRequest) (
 	rm.Nodes = nodes
 	rm.Edges = edges
 
+	// A roadmap and its nodes both carry codes that references name.
+	s.resolveDangling(ctx, rm, nodes, true)
 	emit(ctx, s.events, Event{Type: "roadmap.created", ResearchID: rm.ResearchID, EntityID: rm.ID, Entity: "roadmap"})
 	return rm, nil
 }
@@ -564,10 +569,13 @@ func (s *RoadmapService) AddNodes(ctx context.Context, roadmapID string, nodeReq
 		return nil, err
 	}
 
-	if _, _, err := s.createNodesAndEdges(ctx, rm, nodeReqs, edgeReqs); err != nil {
+	created, _, err := s.createNodesAndEdges(ctx, rm, nodeReqs, edgeReqs)
+	if err != nil {
 		return nil, err
 	}
 
+	// The roadmap is not new here, only its nodes.
+	s.resolveDangling(ctx, rm, created, false)
 	emit(ctx, s.events, Event{Type: "roadmap.updated", ResearchID: rm.ResearchID, EntityID: rm.ID, Entity: "roadmap"})
 
 	// Return full roadmap
@@ -921,3 +929,30 @@ func validateNodeRange(start, end string) error {
 	}
 	return nil
 }
+
+// resolveDangling repairs references that named this roadmap, or one of these
+// nodes, before it existed. `includeRoadmap` is false when the roadmap itself
+// is not new — adding nodes to one that has been cited for weeks must not
+// re-announce the roadmap.
+func (s *RoadmapService) resolveDangling(ctx context.Context, rm *domain.Roadmap, nodes []*domain.RoadmapNode, includeRoadmap bool) {
+	if s.dangling == nil || rm == nil {
+		return
+	}
+	if includeRoadmap {
+		s.dangling.ResolveDanglingRoadmap(ctx, rm.ResearchID, rm.Code, rm.ID)
+	}
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		s.dangling.ResolveDanglingNode(ctx, rm.ResearchID, rm.Code, n.Code, rm.ID, n.ID)
+	}
+}
+
+// SetDanglingResolver supplies the reference table so that creating a roadmap
+// or node repairs the references that already named its code.
+//
+// Set after construction rather than taken as a parameter because EntryService
+// owns the reference table and is built after this one — the same reason
+// EntryService.SetRoadmapRepos exists.
+func (s *RoadmapService) SetDanglingResolver(r DanglingResolver) { s.dangling = r }
