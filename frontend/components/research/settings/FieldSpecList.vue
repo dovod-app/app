@@ -6,10 +6,32 @@
           <ShortCode v-if="section.code" :code="section.code" />
           <h3 class="card-title">{{ section.display_name || section.name }}</h3>
         </div>
-        <span class="cap-count" :class="{ 'is-over': countFor(section) >= caps.fields }">
-          {{ countFor(section) }} / {{ caps.fields }}
-        </span>
+        <div class="spec-head-right">
+          <span class="cap-count" :class="{ 'is-over': countFor(section) >= caps.fields }">
+            {{ countFor(section) }} / {{ caps.fields }}
+          </span>
+          <button
+            v-if="onDelete"
+            type="button"
+            class="btn btn-sm"
+            :class="{ 'btn-danger': !(section.entries_count > 0) }"
+            :disabled="section.entries_count > 0 || busyDelete === section.id"
+            :aria-describedby="section.entries_count > 0 ? `spec-refusal-${section.id}` : undefined"
+            @click="askDelete(section)"
+          >{{ busyDelete === section.id ? 'Deleting…' : 'Delete' }}</button>
+        </div>
       </div>
+
+      <!-- Visible, not a tooltip: a disabled control's `title` reaches neither a
+           keyboard nor a screen reader, which is the rule DangerRow already
+           states. And no "delete anyway" — the refusal *is* the feature; force
+           exists for the API and MCP, where the caller is explicit by
+           construction. -->
+      <p v-if="onDelete && section.entries_count > 0" :id="`spec-refusal-${section.id}`" class="spec-refusal">
+        Holds {{ section.entries_count }} {{ section.entries_count === 1 ? 'document' : 'documents' }}.
+        Empty it first; documents cannot be moved between sections yet.
+        <NuxtLink v-if="researchSlug" :to="`/research/${researchSlug}?section=${section.id}`" class="link-btn">Show them &rarr;</NuxtLink>
+      </p>
 
       <p class="spec-blurb">
         <template v-if="countFor(section)">
@@ -119,6 +141,17 @@
         :on-save="(instruction: string) => onSaveInstruction!(section.id, instruction)"
       />
     </div>
+
+    <ConfirmModal
+      :visible="!!pendingDelete"
+      variant="danger"
+      title="Delete section"
+      :message="`“${pendingDelete?.display_name || pendingDelete?.name}” is empty, so nothing is filed under it. This cannot be undone.`"
+      confirm-label="Delete"
+      :loading="!!busyDelete"
+      @confirm="confirmDelete"
+      @cancel="pendingDelete = null"
+    />
   </div>
 </template>
 
@@ -155,7 +188,40 @@ const props = defineProps<{
    * that is only about field specs.
    */
   onSaveInstruction?: (sectionId: string, instruction: string) => Promise<void>
+  /**
+   * Deletes a section. Optional, and its absence removes the control entirely
+   * rather than disabling it — the same rule the rest of the settings page
+   * follows, and what keeps this component renderable in a story about field
+   * specs alone.
+   *
+   * It is never called for a section holding documents: the button is disabled
+   * and the reason is visible beside it. The API's `force` is deliberately
+   * unreachable from here.
+   */
+  onDelete?: (sectionId: string) => Promise<void>
+  /** For the "show them" link on a refusal. Omitted, the link is not rendered. */
+  researchSlug?: string
 }>()
+
+const busyDelete = ref<string | null>(null)
+const pendingDelete = ref<any | null>(null)
+
+function askDelete(section: any) {
+  if (section.entries_count > 0) return
+  pendingDelete.value = section
+}
+
+async function confirmDelete() {
+  const section = pendingDelete.value
+  if (!section || !props.onDelete) return
+  busyDelete.value = section.id
+  try {
+    await props.onDelete(section.id)
+    pendingDelete.value = null
+  } finally {
+    busyDelete.value = null
+  }
+}
 
 const drafts = reactive<Record<string, DraftField[] | undefined>>({})
 const errors = reactive<Record<string, string>>({})
@@ -236,6 +302,13 @@ async function save(section: any) {
   gap: var(--space-3); margin-bottom: var(--space-2);
 }
 .spec-heading { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.spec-head-right { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
+
+.spec-refusal {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-xs);
+  color: var(--color-text-muted);
+}
 
 .spec-blurb {
   margin: 0 0 var(--space-3);

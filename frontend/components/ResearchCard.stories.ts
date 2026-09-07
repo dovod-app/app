@@ -79,7 +79,42 @@ export const InYourPersonalTeam: Story = {
 }
 
 /**
- * A viewer gets the read-only marker and loses the archive control — the one
+ * An editor gets the `⋯` menu with **Archive** only. Deleting destroys work
+ * belonging to everyone else in the team, so it is not an editor's to take
+ * however many confirmations stand in front of it.
+ */
+export const AsAnEditor: Story = {
+  args: {
+    research: {
+      ...mockResearch,
+      team_name: 'Отдел интеграций',
+      team_is_personal: false,
+      role: 'editor',
+    },
+  },
+}
+
+/**
+ * The owner's menu carries **Delete project** below a divider, in the danger
+ * style. Open the `⋯` to see it.
+ *
+ * The trigger is always visible, unlike the hover-revealed archive icon it
+ * replaced — an action menu that appears on hover is undiscoverable on touch
+ * and invisible-while-focusable on a keyboard.
+ */
+export const AsAnOwner: Story = {
+  args: {
+    research: {
+      ...mockResearch,
+      team_name: 'Отдел интеграций',
+      team_is_personal: false,
+      role: 'owner',
+    },
+  },
+}
+
+/**
+ * A viewer gets the read-only marker and loses the menu entirely — the one
  * place in the list where a role is shown, because it is the one place it
  * takes something away.
  */

@@ -144,6 +144,33 @@ export const Flush: Story = {
   }),
 }
 
+/**
+ * `initialFocus` names the control that should hold focus on open.
+ *
+ * Without it the overlay focuses the first focusable element, which in a dialog
+ * with a header is the close button — and a child that focuses its own field in
+ * its own `visible` watcher **loses the race**: the parent instance registers
+ * first, so its continuation runs last and takes the focus back. A child cannot
+ * win that on its own, which is why this is a prop.
+ *
+ * Open this story and start typing: the text lands in the field, not nowhere.
+ */
+export const InitialFocus: Story = {
+  args: { visible: true, size: 'md', labelledby: 'modal-focus-title', initialFocus: '[data-confirm-code]' },
+  render: (args: any) => ({
+    components: { ModalOverlay },
+    setup() { return { args } },
+    template: `
+      <ModalOverlay v-bind="args">
+        <h2 id="modal-focus-title" style="margin: 0 0 var(--space-3); font-size: var(--type-md);">Delete project</h2>
+        <button type="button" class="btn btn-sm" style="margin-bottom: var(--space-3);">A button that comes first in the DOM</button>
+        <label for="sb-confirm" style="display: block; font-size: var(--type-2xs); font-weight: 600;">Type R3 to confirm</label>
+        <input id="sb-confirm" data-confirm-code class="form-input" style="max-width: 12ch; font-family: 'JetBrains Mono', monospace;" />
+      </ModalOverlay>
+    `,
+  }),
+}
+
 export const Hidden: Story = {
   args: { visible: false },
   render: (args: any) => ({

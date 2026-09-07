@@ -209,6 +209,48 @@ export const WithoutInstructionRow: Story = {
 }
 
 /**
+ * With `onDelete`, each section carries a Delete button — and an empty one is
+ * the only kind it will act on.
+ *
+ * The refusal is **visible text beside the disabled button**, not a `title`: a
+ * disabled control's tooltip reaches neither a keyboard nor a screen reader,
+ * which is the rule `DangerRow` already states. And there is no "delete anyway"
+ * — the refusal *is* the feature. The API's `force` exists for callers that are
+ * explicit by construction, and offering it here would re-create exactly the
+ * accident the refusal prevents.
+ *
+ * "Empty it first" is the honest instruction because a document cannot be moved
+ * between sections anywhere in this product yet. When it can, this copy changes.
+ */
+export const WithDeleteControls: Story = {
+  args: {
+    ...base,
+    researchSlug: 'R3',
+    onDelete: async () => {},
+    sections: [
+      { ...mockSpecSection, entries_count: 8 },
+      { ...mockTopicSection, entries_count: 0 },
+    ],
+  },
+}
+
+/** One document, so the refusal has to read "Holds 1 document." */
+export const DeleteRefusedForOneDocument: Story = {
+  args: {
+    ...base,
+    researchSlug: 'R3',
+    onDelete: async () => {},
+    sections: [{ ...mockTopicSection, entries_count: 1 }],
+  },
+}
+
+/** Without `onDelete` the control is absent rather than disabled — the same
+ *  rule the rest of the settings page follows. */
+export const WithoutDeleteControls: Story = {
+  args: { ...base, sections: [{ ...mockTopicSection, entries_count: 0 }] },
+}
+
+/**
  * Clicks the first button whose label matches, once it exists. There is no
  * `@storybook/test` in this project, so the catalogue polls — same helper shape
  * as `HistoryPanel.stories.ts`.

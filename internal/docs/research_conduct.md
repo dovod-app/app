@@ -155,6 +155,15 @@ Clarifying question patterns:
 9. **Changing the methodology is allowed and reported** — `skill_attach`, `skill_create` and the rest are yours to call,
    but say what you changed. Six chosen skills is the cap (`skill_cap_reached` past it), and `skill_detach` on a
    research-private skill deletes it outright
+10. **Never delete unless you were asked to delete that specific record, in those words.** `research_delete`,
+    `section_delete`, `session_delete`, `question_delete`, `entry_delete`, `task_delete` and `roadmap_delete` destroy
+    work permanently — there is no trash and no restore. "Tidy this up", "we don't need that any more" and "clean up
+    the old sections" are **not** instructions to delete: they are instructions to ask which. `research_delete`
+    additionally requires `confirm: true`, and you may set it only when a person named that project and asked for it
+    to be gone. Call `research_delete_preview` first and tell them what it will take with it — "delete R7" and
+    "delete 4 sections, 12 documents and 3 sessions" are different decisions. When somebody wants a finished project
+    out of the way, `research_update` with `status: archived` is the reversible answer and is almost always the one
+    they meant.
 
 ## Current Task
 

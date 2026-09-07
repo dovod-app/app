@@ -167,6 +167,8 @@
         :reserved-keys="reservedKeys"
         :on-save="saveFieldSpec"
         :on-save-instruction="saveInstruction"
+        :on-delete="canWrite ? deleteSection : undefined"
+        :research-slug="researchSlug"
       />
     </div>
 
@@ -399,6 +401,25 @@ onMounted(async () => {
     // a reserved key before the server does.
   }
 })
+
+/* Never sends `force`. The component refuses a section holding documents and
+   says so in visible text; the force path exists for the API and MCP, where the
+   caller is explicit by construction. Adding a "delete anyway" here would
+   re-create the accident the refusal prevents. */
+async function deleteSection(sectionId: string) {
+  const section = sections.value.find((s: any) => s.id === sectionId)
+  try {
+    await authFetch(`${base}/api/sections/${sectionId}`, { method: 'DELETE' })
+    researchData.value = await authFetch<any>(`${base}/api/researches/${id}`)
+    toasts.push({
+      variant: 'success',
+      title: 'Section deleted',
+      message: `“${section?.display_name || section?.name || 'The section'}” has been removed.`,
+    })
+  } catch (e: any) {
+    toasts.error(e?.data?.error ?? 'The server refused it.', 'Could not delete section')
+  }
+}
 
 async function saveFieldSpec(sectionId: string, spec: any[]) {
   await authFetch(`${base}/api/sections/${sectionId}`, {

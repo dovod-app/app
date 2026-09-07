@@ -18,6 +18,16 @@
         <div class="question-badges">
           <StatusBadge :status="question.status" />
           <StatusBadge v-if="question.priority" :status="question.priority" />
+          <!-- In the header rather than in the awaiting-answer empty state,
+               which only renders for a pending question: an answered one is
+               exactly the kind somebody wants gone, and there it would have had
+               no control at all. A button rather than a `⋯`, because a menu
+               holding one item is more work to reach than the item. -->
+          <button
+            v-if="canWrite"
+            class="btn btn-sm btn-danger no-print"
+            @click="confirmDelete = true"
+          >Delete</button>
         </div>
       </div>
       <div class="question-meta">
@@ -125,6 +135,17 @@
   </div>
 
   <EmptyState v-else icon="&#x1F50D;" title="Question not found" />
+
+  <ConfirmModal
+    :visible="confirmDelete"
+    variant="danger"
+    title="Delete question"
+    :message="deleteMessage"
+    confirm-label="Delete"
+    :loading="deleting"
+    @confirm="deleteQuestion"
+    @cancel="confirmDelete = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -166,6 +187,39 @@ const question = computed(() =>
 const { canWrite, setFromResearch } = useResearchRole()
 const { authFetch } = useAuth()
 const rtBase = useRuntimeConfig().public.apiBase || ''
+
+/* --- Deleting the question --- */
+const confirmDelete = ref(false)
+const deleting = ref(false)
+
+/* "Its follow-up questions stay in the session" is true because
+   questions.parent_id is ON DELETE SET NULL in all three dialects. Like the
+   session copy next door, it is a promise about the database and has to change
+   if that ever does. */
+const deleteMessage = computed(() => {
+  const q = question.value
+  const label = q?.code || 'This question'
+  const head = q?.answer
+    ? `${label} and the answer recorded for it are deleted.`
+    : `${label} is deleted.`
+  const followUps = (q?.children?.length ?? 0) > 0 ? ' Its follow-up questions stay in the session.' : ''
+  return `${head}${followUps} This cannot be undone.`
+})
+
+async function deleteQuestion() {
+  deleting.value = true
+  try {
+    const label = question.value?.code || 'The question'
+    await authFetch(`${rtBase}/api/questions/${question.value.id}`, { method: 'DELETE' })
+    confirmDelete.value = false
+    await navigateTo(`/research/${researchSlug.value}/session/${sessionId}`)
+    useToasts().push({ variant: 'success', title: 'Question deleted', message: `${label} has been removed.` })
+  } catch (e: any) {
+    useToasts().error(e?.data?.error ?? 'The server refused it.', 'Could not delete question')
+  } finally {
+    deleting.value = false
+  }
+}
 const answerFieldId = useId()
 
 const QUESTION_STATUSES = ['pending', 'in_progress', 'answered', 'deferred', 'skipped'] as const

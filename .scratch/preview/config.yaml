@@ -1,0 +1,6 @@
+transport: sse
+mcp_port: 8112
+web_port: 8111
+db: ".scratch/preview/preview.db"
+log_level: info
+auth_enabled: false
