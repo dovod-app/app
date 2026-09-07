@@ -78,12 +78,17 @@ func (r *CrossRefRepository) ReplaceForSource(ctx context.Context, sourceType, s
 // DanglingMatch names one shape of reference that an entity just created would
 // satisfy.
 //
-// Two shapes exist because two code scopes do. An entry code is unique only
-// within its research, so `[[E20]]` may be resolved only against sources in the
-// same research — SourceResearchID carries that. A research, roadmap or node
-// code is global, so `[[RM1]]` and `[[R3:E20]]` are matched everywhere and
-// SourceResearchID is left empty. Getting that backwards is how one team's
-// `[[E20]]` starts pointing at another team's document.
+// Two shapes exist because two code scopes do, and the line between them is
+// narrower than it looks. Entry, task, roadmap and node codes are all allocated
+// **per research** — every research has an E1, and every research's first
+// roadmap is RM1 — so `[[E20]]`, `[[T4]]`, `[[RM1]]` and `[[RM1:N3]]` may be
+// resolved only against sources in the same research, which is what
+// SourceResearchID carries. Only a research code is global: `[[R2]]`, and
+// `[[R3:E20]]`, which names its research on its face. Those two set Global.
+//
+// Getting it backwards is how one team's `[[RM1]]` starts pointing at another
+// team's roadmap, and it is not recoverable: the `resolved=0` guard below then
+// refuses to repair the row when the research's own RM1 finally appears.
 type DanglingMatch struct {
 	Ref string
 	// SourceResearchID restricts the match to references written inside one

@@ -634,9 +634,11 @@ type RebuildReport struct {
 // crossref_resolve.go); this exists for the cases nothing can hook — an import,
 // a restore, codes backfilled onto records that predate them.
 //
-// Every kind of source is rescanned, not only documents. `[[...]]` is extracted
-// from task results and question answers too, and a rebuild that skipped them
-// left exactly those references broken while reporting success.
+// It rescans documents, task results and question answers — not documents
+// alone, which is what it used to do, leaving exactly the references written
+// from a task or an answer broken while reporting success. Annotation-sourced
+// rows are counted in the report but not rescanned; an annotation is not a
+// source this rewrites.
 func (s *EntryService) RebuildCrossRefs(ctx context.Context, researchID string) (RebuildReport, error) {
 	var report RebuildReport
 	// Accept an R code, because the tool that calls this is handed one by

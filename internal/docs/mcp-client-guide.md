@@ -50,7 +50,7 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 Over **stdio** nothing is asked of you: the client starts the process, and the
 process is the boundary. Everything in this section is about the two transports
 that arrive over a socket, and **the credential is the same one for both** — the
-gate exists to protect the 52 tools, not a particular door, and a token that
+gate exists to protect the 53 tools, not a particular door, and a token that
 closes one and not the other is not a credential:
 
 - **Streamable HTTP** on the web port (`:8088` by default), which is what
