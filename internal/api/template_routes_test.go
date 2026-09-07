@@ -49,7 +49,7 @@ func newTemplateServer(t *testing.T) *templateServer {
 	crossrefRepo := storage.NewCrossRefRepository(db)
 	externalLinkRepo := storage.NewExternalLinkRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, true)
 	hub := ws.NewHub(log)
 	events := service.NoopNotifier{}
 

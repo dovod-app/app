@@ -779,6 +779,12 @@ func (s *SkillService) requireTeamRead(ctx context.Context, teamID string) error
 	}
 	uid := auth.UserIDFromContext(ctx)
 	if uid == "" {
+		if s.access.AccountsEnabled() {
+			// Nobody is everybody only on an instance with no accounts. With
+			// accounts on this is a caller who did not authenticate, and a team
+			// they are not in is one they cannot know exists.
+			return ErrNotFound
+		}
 		return nil
 	}
 	if _, ok, err := s.teams.FindRole(ctx, teamID, uid); err != nil {
@@ -824,6 +830,9 @@ func (s *SkillService) requireTeamWrite(ctx context.Context, teamID string) erro
 	}
 	uid := auth.UserIDFromContext(ctx)
 	if uid == "" {
+		if s.access.AccountsEnabled() {
+			return ErrNotFound
+		}
 		return nil
 	}
 	if teamID == domain.LocalTeamID {

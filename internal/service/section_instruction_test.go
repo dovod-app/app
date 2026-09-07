@@ -240,7 +240,7 @@ func TestSectionInstruction_CreationDropsAnOverLongOneInsteadOfFailing(t *testin
 	db := setupTestDB(t)
 	teams := storage.NewTeamRepository(db)
 	svc := NewResearchService(storage.NewResearchRepository(db), storage.NewSectionRepository(db),
-		teams, NewAccess(teams), &mockNotifier{}, slog.Default())
+		teams, NewAccess(teams, false), &mockNotifier{}, slog.Default())
 	ctx := context.Background()
 
 	_, sections, err := svc.Create(ctx, CreateResearchRequest{

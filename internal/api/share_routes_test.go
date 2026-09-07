@@ -65,7 +65,7 @@ func newShareServer(t *testing.T) *shareServer {
 	externalLinkRepo := storage.NewExternalLinkRepository(db)
 	shareRepo := storage.NewShareRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, false)
 	hub := ws.NewHub(log)
 	events := service.NoopNotifier{}
 
@@ -1004,7 +1004,7 @@ func TestShareRoutes_SkillServiceRefusesAShareContext(t *testing.T) {
 
 	skills := service.NewSkillService(storage.NewSkillRepository(s.db),
 		storage.NewResearchRepository(s.db), storage.NewTeamRepository(s.db),
-		service.NewAccess(storage.NewTeamRepository(s.db)), service.NoopNotifier{},
+		service.NewAccess(storage.NewTeamRepository(s.db), false), service.NoopNotifier{},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if _, err := skills.LoadBuiltinSkills(context.Background()); err != nil {
 		t.Fatalf("load builtins: %v", err)

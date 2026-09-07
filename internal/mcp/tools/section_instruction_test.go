@@ -29,7 +29,7 @@ func TestSectionInstruction_MCPPayloads(t *testing.T) {
 
 	log := slog.Default()
 	teams := storage.NewTeamRepository(db)
-	access := service.NewAccess(teams)
+	access := service.NewAccess(teams, false)
 	sectionRepo := storage.NewSectionRepository(db)
 	researchRepo := storage.NewResearchRepository(db)
 	researchSvc := service.NewResearchService(researchRepo, sectionRepo, teams, access, service.NoopNotifier{}, log)

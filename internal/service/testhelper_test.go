@@ -44,10 +44,19 @@ func (m *mockNotifier) hasEvent(eventType string) bool {
 
 func ptr[T any](v T) *T { return &v }
 
-// testAccess builds the guard every service is handed. Tests construct
-// services by hand, so this is the one place the wiring lives for them.
+// testAccess builds the guard every service is handed, for an instance with no
+// accounts. Tests construct services by hand, so this is the one place the
+// wiring lives for them.
 func testAccess(db *bun.DB) *Access {
-	return NewAccess(storage.NewTeamRepository(db))
+	return NewAccess(storage.NewTeamRepository(db), false)
+}
+
+// testAccessWithAccounts is the same guard on an instance that has `auth_enabled`
+// set. The difference is only visible to a caller who is nobody: with accounts
+// off that is the local single-binary owner, and with accounts on it is a
+// stranger.
+func testAccessWithAccounts(db *bun.DB) *Access {
+	return NewAccess(storage.NewTeamRepository(db), true)
 }
 
 // createTestUser makes a user with the personal team registration would have

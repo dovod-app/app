@@ -129,6 +129,12 @@ func (s *ResearchService) Create(ctx context.Context, req CreateResearchRequest)
 func (s *ResearchService) resolveCreateTeam(ctx context.Context, requested string) (string, error) {
 	uid := auth.UserIDFromContext(ctx)
 	if uid == "" {
+		if s.access.AccountsEnabled() {
+			// An instance with accounts has no anonymous author. Letting the
+			// research through would file it in the local team, where the
+			// person who asked for it could not read it back.
+			return "", ErrNoAuth
+		}
 		// Local mode: no users, one team, everything in it.
 		return domain.LocalTeamID, nil
 	}
@@ -257,6 +263,15 @@ func (s *ResearchService) List(ctx context.Context, filter storage.ResearchFilte
 	}
 
 	uid := auth.UserIDFromContext(ctx)
+	if uid == "" && s.access.AccountsEnabled() {
+		// Same reason as the share above, and the same shape of mistake: with
+		// accounts on there is nobody to scope by, so the filter would be left
+		// unset and the answer would be every research on the server. The
+		// caller who reaches here is an anonymous stdio session — the one
+		// transport that authenticates nobody — and it sees what any stranger
+		// sees, which is nothing.
+		return []*domain.Research{}, nil
+	}
 	if uid != "" {
 		filter.MemberOf = &uid
 	}

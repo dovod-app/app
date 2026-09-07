@@ -40,10 +40,24 @@ type roleKit struct {
 
 func newRoleKit(t *testing.T) *roleKit {
 	t.Helper()
+	return newRoleKitFor(t, false)
+}
+
+// newRoleKitWithAccounts wires the same services on an instance that has
+// `auth_enabled` set. The matrix itself does not need the distinction — every
+// case in it has a real user — but the row for a caller who is nobody does: it
+// is the only role whose answer depends on which kind of instance this is.
+func newRoleKitWithAccounts(t *testing.T) *roleKit {
+	t.Helper()
+	return newRoleKitFor(t, true)
+}
+
+func newRoleKitFor(t *testing.T, accountsEnabled bool) *roleKit {
+	t.Helper()
 	db := setupTestDB(t)
 	log := slog.Default()
 	notifier := &mockNotifier{}
-	access := testAccess(db)
+	access := NewAccess(storage.NewTeamRepository(db), accountsEnabled)
 
 	researchRepo := storage.NewResearchRepository(db)
 	sectionRepo := storage.NewSectionRepository(db)
@@ -330,6 +344,71 @@ func TestRoles_ViewerCannotWriteAnything(t *testing.T) {
 // A section instruction is read by everyone in the team and written only by
 // somebody who may write content. It is a convention for the documents, not a
 // setting about the team, so it does not need an owner.
+// TestRoles_AnonymousIsNotARoleWhenAccountsAreOn adds the row the matrix never
+// had: a caller with no identity at all.
+//
+// Every other case here holds a real user, so nothing above would notice that
+// "no user" was its own, most privileged role — reads and writes both, on every
+// research on the server. That is what an anonymous stdio session was, and the
+// deletes make the consequence permanent.
+func TestRoles_AnonymousIsNotARoleWhenAccountsAreOn(t *testing.T) {
+	k := newRoleKitWithAccounts(t)
+	owner, _, research, section, _ := k.sharedResearch(t, domain.TeamViewer)
+
+	entry, err := k.entry.Create(owner, CreateEntryRequest{
+		ResearchID: research.ID, SectionID: section.ID, Title: "Seed", Content: "body",
+	})
+	if err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+	task, err := k.task.Create(owner, CreateTaskRequest{ResearchID: research.ID, Title: "Seed task"})
+	if err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	anon := context.Background()
+	ops := map[string]func() error{
+		"research get": func() error { _, err := k.research.Get(anon, research.ID); return err },
+		"research update": func() error {
+			_, err := k.research.Update(anon, research.ID, UpdateResearchRequest{Goal: ptr("mine")})
+			return err
+		},
+		"sections": func() error { _, err := k.section.List(anon, research.ID); return err },
+		"section update": func() error {
+			_, err := k.section.Update(anon, section.ID, UpdateSectionRequest{DisplayName: ptr("Renamed")})
+			return err
+		},
+		"entries":    func() error { _, err := k.entry.ListByResearch(anon, research.ID, storage.EntryFilter{}); return err },
+		"entry read": func() error { _, err := k.entry.Get(anon, entry.ID); return err },
+		"entry create": func() error {
+			_, err := k.entry.Create(anon, CreateEntryRequest{ResearchID: research.ID, SectionID: section.ID, Title: "T", Content: "c"})
+			return err
+		},
+		"tasks": func() error { _, err := k.task.List(anon, research.ID, storage.TaskFilter{}); return err },
+		"task update": func() error {
+			_, err := k.task.Update(anon, task.ID, UpdateTaskRequest{Title: ptr("mine")})
+			return err
+		},
+		"sessions": func() error { _, err := k.session.ListByResearch(anon, research.ID); return err },
+		"roadmaps": func() error { _, err := k.roadmap.List(anon, research.ID); return err },
+		"resume":   func() error { _, err := k.resume.Get(anon, research.ID, ResumeRequest{}); return err },
+	}
+	for name, call := range ops {
+		if err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound — an anonymous caller is a stranger once accounts exist", name, err)
+		}
+	}
+
+	// The list is the one read that answers without consulting the guard.
+	list, err := k.research.List(anon, storage.ResearchFilter{})
+	if err != nil {
+		t.Fatalf("research list: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("research list gave an anonymous caller %d research(es), want 0", len(list))
+	}
+}
+
 func TestRoles_SectionInstructionIsReadByEveryoneAndWrittenByWriters(t *testing.T) {
 	const instruction = "Name the producing service. State the consumer."
 	for _, tc := range []struct {

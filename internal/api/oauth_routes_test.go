@@ -65,7 +65,7 @@ func newOAuthServer(t *testing.T) *oauthServer {
 	externalLinkRepo := storage.NewExternalLinkRepository(db)
 	oauthRepo := storage.NewOAuthRepository(db)
 
-	access := service.NewAccess(teamRepo)
+	access := service.NewAccess(teamRepo, true)
 	hub := ws.NewHub(log)
 	events := service.NoopNotifier{}
 

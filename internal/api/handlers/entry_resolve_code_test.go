@@ -36,8 +36,8 @@ func TestResolveCode_DoesNotCrossUsers(t *testing.T) {
 	blockRepo := storage.NewBlockRepository(db)
 	crossrefRepo := storage.NewCrossRefRepository(db)
 
-	researchSvc := service.NewResearchService(researchRepo, sectionRepo, storage.NewTeamRepository(db), service.NewAccess(storage.NewTeamRepository(db)), nopNotifier{}, log)
-	entrySvc := service.NewEntryService(entryRepo, sectionRepo, researchRepo, service.NewAccess(storage.NewTeamRepository(db)), nil, blockRepo, storage.NewEntryRevisionRepository(db), crossrefRepo, nil, nopNotifier{}, log)
+	researchSvc := service.NewResearchService(researchRepo, sectionRepo, storage.NewTeamRepository(db), service.NewAccess(storage.NewTeamRepository(db), false), nopNotifier{}, log)
+	entrySvc := service.NewEntryService(entryRepo, sectionRepo, researchRepo, service.NewAccess(storage.NewTeamRepository(db), false), nil, blockRepo, storage.NewEntryRevisionRepository(db), crossrefRepo, nil, nopNotifier{}, log)
 	handler := NewEntryHandler(entrySvc, researchSvc, entryRepo, researchRepo, storage.NewUserRepository(db), storage.NewTeamRepository(db), log)
 
 	teamRepo := storage.NewTeamRepository(db)
