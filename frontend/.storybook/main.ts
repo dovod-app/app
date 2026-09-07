@@ -99,6 +99,10 @@ const config: StorybookConfig = {
               [path.resolve(__dirname, './stubs/imports')]: [
                 'useApi',
                 'useAuth',
+                // useResearchRole calls this, so it has to resolve here even
+                // though no component names it: an unresolved identifier inside
+                // a composable throws in setup() and the story renders blank.
+                'useServerInfo',
                 'useRuntimeConfig',
                 'useRealtimeUpdates',
                 'useKeyboardNav',

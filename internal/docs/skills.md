@@ -288,7 +288,9 @@ changed: the research for the `/api/researches/{id}/skills…` routes, the team 
 `/api/teams/{id}/skills` and for forking or promoting into a library, and — for
 the by-id routes — whichever of the two the skill belongs to. A `viewer` gets
 `403`, a non-member `404`. With `auth_enabled: false` there is nobody to check
-and every route is permitted.
+and every route is permitted — to a caller the server accepts a write from at
+all: with no `api_token` configured either, that is one on the server's own
+machine and nobody else.
 
 Conflicts carry a `code` so a client can tell them apart without matching on
 prose:

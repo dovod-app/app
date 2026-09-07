@@ -15,7 +15,7 @@
       title="Settings"
     >
       <template #actions>
-        <TeamViewerNotice v-if="isViewer" :team-name="research?.team_name" />
+        <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="research?.team_name" />
       </template>
     </PageHeader>
 
@@ -185,7 +185,7 @@ const { data: researchData, pending } = await useApi<any>(`/api/researches/${id}
 const research = computed(() => researchData.value?.data?.research)
 const researchSlug = computed(() => research.value?.code || id)
 
-const { canWrite, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, readOnlyReason, setFromResearch } = useResearchRole()
 watch(research, r => setFromResearch(r), { immediate: true })
 
 /* The tab lives in the query string so a link can point at one, and it is

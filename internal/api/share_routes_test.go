@@ -257,6 +257,12 @@ func (s *shareServer) do(method, path, body string) (int, string) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	// This server runs with no api_token and no accounts, where a write is
+	// accepted from a client on the machine the server is on and refused from
+	// anywhere else. httptest defaults RemoteAddr to 192.0.2.1 and Host to
+	// example.com, and auth.LocalRequest reads both.
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = "localhost:8088"
 	s.mux.ServeHTTP(rec, req)
 	return rec.Code, rec.Body.String()
 }
@@ -1109,6 +1115,7 @@ func TestShareRoutes_ExportsCarryNoDocumentMetadata(t *testing.T) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(raw))
 		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr, req.Host = "127.0.0.1:54321", "localhost:8088" // see shareServer.do
 		s.mux.ServeHTTP(rec, req)
 		return rec.Code
 	}
