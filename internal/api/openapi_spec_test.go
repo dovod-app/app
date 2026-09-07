@@ -87,7 +87,7 @@ func newSpecServer(t *testing.T, opts ...func(*ServerConfig)) *specServer {
 	obsidianSvc := service.NewObsidianService(researchSvc, sectionSvc, entryRepo, sessionSvc, taskSvc, roadmapSvc,
 		storage.NewEntryRevisionRepository(db), log)
 	teamSvc := service.NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db),
-		researchRepo, events, log)
+		researchRepo, access, events, log)
 	shareSvc := service.NewShareService(storage.NewShareRepository(db), access, events, log)
 	skillSvc := service.NewSkillService(storage.NewSkillRepository(db), researchRepo, teamRepo, access, events, log)
 	templateSvc := service.NewTemplateService(storage.NewTemplateRepository(db), storage.NewSkillRepository(db),

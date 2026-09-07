@@ -48,7 +48,11 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 ## Connecting Over HTTP: Which Credential This Instance Wants
 
 Over **stdio** nothing is asked of you: the client starts the process, and the
-process is the boundary. Everything in this section is about the two transports
+process is the boundary. One exception, and it is visible rather than subtle: if
+that process was started with accounts enabled and no default user, the session
+is nobody — `research_list` comes back empty, every tool naming a project
+answers "not found", and `team_list` says so in as many words. Nothing you can
+send fixes it; the server needs `--default-user`. Everything else in this section is about the two transports
 that arrive over a socket, and **the credential is the same one for both** — the
 gate exists to protect the 52 tools, not a particular door, and a token that
 closes one and not the other is not a credential:

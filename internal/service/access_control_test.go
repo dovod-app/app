@@ -559,6 +559,16 @@ func TestAccessControl_AnonymousCallerWithAccountsOn(t *testing.T) {
 		t.Errorf("create as an anonymous caller: err = %v, want ErrNoAuth", err)
 	}
 
+	// Moving a research between teams is the highest-value write there is, and
+	// TeamService held its own copy of the no-caller rule. It is unreachable
+	// over HTTP — both routes are accessWrite — and there is no MCP tool for it,
+	// so this test is what keeps it closed if either of those changes.
+	teams := NewTeamService(teamRepo, storage.NewTeamInviteRepository(db),
+		storage.NewUserRepository(db), researchRepo, access, notifier, log)
+	if err := teams.TransferResearch(anon, research.ID, "team-local"); !errors.Is(err, ErrNoAuth) {
+		t.Errorf("transfer as an anonymous caller: err = %v, want ErrNoAuth", err)
+	}
+
 	// And the same caller on an instance with no accounts is still the owner of
 	// everything — the local single-binary mode this product started as.
 	localOnly := NewResearchService(researchRepo, sectionRepo, teamRepo, testAccess(db), notifier, log)
@@ -584,7 +594,7 @@ func TestAccessControl_AnonymousCallerAndTheTeamLibraries(t *testing.T) {
 	skills := NewSkillService(skillRepo, storage.NewResearchRepository(db), teamRepo, access, notifier, log)
 	templates := NewTemplateService(storage.NewTemplateRepository(db), skillRepo, teamRepo, access, log)
 	teams := NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db),
-		storage.NewResearchRepository(db), notifier, log)
+		storage.NewResearchRepository(db), access, notifier, log)
 
 	user := createTestUser(t, db, "librarian@test.com", "Librarian")
 	owner := userCtx(user)

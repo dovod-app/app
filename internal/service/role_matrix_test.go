@@ -86,7 +86,7 @@ func newRoleKitFor(t *testing.T, accountsEnabled bool) *roleKit {
 		resume: NewResumeService(researchSvc, sessionRepo, storage.NewTaskRepository(db),
 			storage.NewQuestionRepository(db), storage.NewAnnotationRepository(db), entryRepo,
 			storage.NewEntryRevisionRepository(db), access, log),
-		team:     NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db), researchRepo, notifier, log),
+		team:     NewTeamService(teamRepo, storage.NewTeamInviteRepository(db), storage.NewUserRepository(db), researchRepo, access, notifier, log),
 		teamRepo: teamRepo,
 		events:   notifier,
 	}

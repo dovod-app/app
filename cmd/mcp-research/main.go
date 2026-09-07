@@ -109,7 +109,7 @@ func main() {
 	// only record of what somebody did not believe.
 	exportSvc.SetAnnotations(annotationRepo)
 	obsidianSvc := service.NewObsidianService(researchSvc, sectionSvc, entryRepo, sessionSvc, taskSvc, roadmapSvc, revisionRepo, log)
-	teamSvc := service.NewTeamService(teamRepo, teamInviteRepo, userRepo, researchRepo, events, log)
+	teamSvc := service.NewTeamService(teamRepo, teamInviteRepo, userRepo, researchRepo, access, events, log)
 	shareSvc := service.NewShareService(shareRepo, access, events, log)
 	skillSvc := service.NewSkillService(skillRepo, researchRepo, teamRepo, access, events, log)
 
@@ -243,7 +243,8 @@ func main() {
 		// and working, and taking the whole binary down over an unusable
 		// transport would break the one thing that is fine.
 		if cfg.AuthEnabled && defaultUser == nil {
-			log.Warn("stdio transport cannot authenticate anyone and no default user is set — every MCP tool will answer \"not found\"",
+			log.Warn("stdio transport cannot authenticate anyone and no default user is set — this session will reach no research",
+				"symptom", "research_list answers an empty list, every tool naming a research answers \"not found\", and research_create refuses with \"authentication required\"",
 				"fix", "set --default-user (or MCP_RESEARCH_DEFAULT_USER / default_user) to the email the stdio session should act as",
 				"unaffected", "the web UI and REST API on the web port")
 		}
