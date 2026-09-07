@@ -703,7 +703,11 @@ Links between documents, extracted automatically from `[[...]]` patterns.
 | Question | `answer` | `question_update` |
 | Task | `description` + `result` | `task_update` (not on create) |
 
-**Resolution:** References are resolved when the target exists. Unresolved references are tracked and can be resolved later via `POST /api/researches/{id}/crossrefs/rebuild`, which re-scans entry content. Roadmap references (`[[RM1]]`, `[[RM1:N3]]`) are resolved against the roadmaps and roadmap_nodes tables.
+**Resolution:** A reference resolves when its target exists — and the target does not have to exist first. A reference written before its target is stored unresolved and is **repaired the moment the target is created**: creating an entry, task, roadmap, node or research points every waiting reference at it and emits `crossrefs.resolved`.
+
+Only the qualified forms are matched across researches — `[[R3:E20]]` and `[[R2]]`, which carry a research code, and research codes are global. A bare `[[E20]]`, a `[[T4]]`, a `[[RM1]]` and a `[[RM1:N3]]` are matched **only inside the research they were written in**, because all four of those codes are allocated per research and repeat across them. An already-resolved reference is never silently re-pointed at a newer holder of the same code.
+
+So an unresolved reference whose target now exists is a typo, a deleted target, or a code from another research — not a race. `POST /api/researches/{id}/crossrefs/rebuild` (MCP: `crossref_rebuild`) re-scans every source — documents, task results, question answers — and reports `{sources, references, unresolved}`; `rebuilt` is kept as an alias of `references`, having previously counted documents while being documented as references. It is the last resort: a restore, or codes backfilled onto records that predate them. `GET /api/researches/{id}/crossrefs` carries a `summary` beside the list — `total`, `unresolved`, `dangling` (the first 12 distinct codes that point at nothing) and `dangling_total` — all counted after the visibility filter, so the numbers describe what this reader can see.
 
 **Visualization:** Shown on entry detail pages (outgoing/incoming), in the mindmap and the knowledge graph view (dashed / crossref edges), and preserved in export.
 

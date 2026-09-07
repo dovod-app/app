@@ -940,6 +940,22 @@ a.short-code:focus-visible {
    keyboard user could focus a control in a "disabled" row and press it into
    nothing. `inert` on the element is what actually takes it out of the document,
    and `aria-busy` is what says why. */
+/* Text on the left, an action on the right, stacked below 768px. `.data-row`
+   defaults to a grid, so every such row wrote the same six declarations in its
+   own scoped block — SkillRowList and MaintenanceCard were identical. DangerRow
+   is a near-copy and is deliberately left alone: it is not a `.data-row` and
+   draws its own padding and dividers. */
+.data-row--split {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.data-row--split > :first-child { min-width: 0; }
+@media (max-width: 768px) {
+  .data-row--split { flex-direction: column; align-items: stretch; }
+}
+
 .data-row--busy { color: var(--color-text-muted); }
 .data-row--busy :is(button, a, select, input) { cursor: progress; }
 /* One rendering for "this row is over". An expired invite used muted text and
@@ -1010,6 +1026,16 @@ a.short-code:focus-visible {
   padding: var(--space-6) var(--row-inset, var(--space-1));
   font-size: var(--type-sm);
   color: var(--color-text-muted);
+}
+/* The sentence under a list card's heading saying what the list is for. It was
+   scoped inside SkillRowList, so the second card to use the class rendered it
+   at body size in full-contrast text, running the whole card width — a heading
+   and its blurb became indistinguishable. Nothing warns about a class that is
+   used and never defined; css-consistency only sees collisions. */
+.group-blurb {
+  font-size: var(--type-xs);
+  color: var(--color-text-muted);
+  max-width: var(--measure-prose);
 }
 
 /* The list card has no padding to shrink; what shrinks is the inset it hands to

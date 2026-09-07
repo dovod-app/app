@@ -73,7 +73,10 @@ that conversation ends; work continues when you ask an assistant to resume it.
 - **Documents and evidence.** Markdown and structured blocks, tables,
   checklists, transcripts, Mermaid diagrams, and sandboxed HTML artifacts.
   Cross-references such as `[[E3]]` connect documents; `[[R2:E5]]` links across
-  projects.
+  projects. A reference written before its target exists — the usual order,
+  since the assistant names a document before writing it — connects itself when
+  that document, task, or roadmap is created, so the knowledge graph shows the
+  same links the text does.
 - **Questions and answers.** Interview sessions with follow-up questions,
   deferred answers, and a visible record of what remains open.
 - **Review and history.** Marks on specific passages, the assistant's
@@ -324,7 +327,9 @@ The API reference describes which credential each route accepts.
 The same guides are available in this repository:
 
 - [MCP client guide and tools](internal/docs/mcp-client-guide.md)
-- [Project data model](internal/docs/domain-guide.md)
+- [Conducting a project](internal/docs/conducting-research.md) and the
+  [project data model](internal/docs/domain-guide.md)
+- [Document metadata](internal/docs/metadata.md)
 - [Review marks](internal/docs/annotations.md) and [revision history](internal/docs/revisions.md)
 - [Block documents](internal/docs/blocks.md) and [HTML artifacts](internal/docs/artifacts.md)
 - [Tasks](internal/docs/tasks.md), [roadmaps](internal/docs/roadmaps.md), and [exports](internal/docs/export.md)

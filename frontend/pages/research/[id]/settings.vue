@@ -71,6 +71,11 @@
           </EditableField>
         </div>
       </div>
+
+      <!-- Removed for a viewer rather than disabled: the house rule, and the
+           route behind it is a write. There is no share twin of this page, so
+           "never on a share" is true by construction rather than by a guard. -->
+      <ResearchSettingsMaintenanceCard v-if="canWrite" :research-id="id" />
     </div>
 
     <!-- Skills -->

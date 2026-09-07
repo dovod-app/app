@@ -87,6 +87,10 @@ type EntryService struct {
 	// tasks is optional; see SetTaskRepo. Present, a task_ref block exports as a
 	// checklist with real titles instead of a list of codes.
 	tasks *storage.TaskRepository
+	// questionRepo lets the rebuild reach answers. Optional, like the two above:
+	// without it a rebuild repairs documents and tasks and says so honestly in
+	// its source count, rather than failing.
+	questionRepo *storage.QuestionRepository
 	// annotations is optional; see SetAnnotations. Present, an entry write
 	// reports which marks it drifted or orphaned.
 	annotations *storage.AnnotationRepository
@@ -282,6 +286,10 @@ func (s *EntryService) Create(ctx context.Context, req CreateEntryRequest) (*dom
 
 	s.updateCrossRefs(ctx, entry)
 	s.updateExternalLinks(ctx, entry)
+	// This document's own outgoing references are stored above. This repairs the
+	// incoming ones — everything that already cited this code while it named
+	// nothing. See crossref_resolve.go.
+	s.ResolveDanglingEntry(ctx, entry.ResearchID, entry.Code, entry.ID)
 	emit(ctx, s.events, Event{Type: "entry.created", ResearchID: entry.ResearchID, EntityID: entry.ID, Entity: "entry"})
 	return entry, nil
 }
@@ -600,31 +608,123 @@ func (s *EntryService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// RebuildCrossRefs rescans all entries in a research and rebuilds cross-references.
+// RebuildReport is what a rebuild actually did.
+//
+// It replaces a single integer that was named `rebuilt` and documented as "how
+// many references were found", while being neither: it counted documents
+// rescanned. A person pressing the button on a research with 22 documents and
+// three links was told "22 references".
+type RebuildReport struct {
+	// Sources rescanned — documents, task results, question answers.
+	Sources int `json:"sources"`
+	// References found across all of them, and how many of those still name
+	// nothing. Unresolved is the number worth acting on: after the create-time
+	// repair it should be a typo or a deleted target, not a timing race.
+	References int `json:"references"`
+	Unresolved int `json:"unresolved"`
+}
+
+// RebuildCrossRefs rescans a research and rebuilds its cross-references.
 //
 // It rewrites stored rows, so it is a write however much it reads: a viewer
 // pointing this at a research would edit its index.
-func (s *EntryService) RebuildCrossRefs(ctx context.Context, researchID string) (int, error) {
+//
+// It is the last resort, not the mechanism. A reference written before its
+// target exists is repaired the moment the target is created (see
+// crossref_resolve.go); this exists for the cases nothing can hook — an import,
+// a restore, codes backfilled onto records that predate them.
+//
+// Every kind of source is rescanned, not only documents. `[[...]]` is extracted
+// from task results and question answers too, and a rebuild that skipped them
+// left exactly those references broken while reporting success.
+func (s *EntryService) RebuildCrossRefs(ctx context.Context, researchID string) (RebuildReport, error) {
+	var report RebuildReport
+	// Accept an R code, because the tool that calls this is handed one by
+	// research_get and its schema says it may pass one. Everything below is
+	// scoped to the resolved id, never to the caller's string.
+	researchID = s.resolveResearchID(ctx, researchID)
 	if err := s.access.Write(ctx, researchID); err != nil {
-		return 0, err
+		return report, err
 	}
 	entries, err := s.entries.FindByResearchWithContent(ctx, researchID)
 	if err != nil {
-		return 0, fmt.Errorf("fetch entries: %w", err)
+		return report, fmt.Errorf("fetch entries: %w", err)
 	}
 
-	count := 0
 	for _, entry := range entries {
 		s.updateCrossRefs(ctx, entry)
 		s.updateExternalLinks(ctx, entry)
-		count++
+		report.Sources++
+	}
+	report.Sources += s.rebuildOtherSources(ctx, researchID)
+
+	// Counted from the table rather than tallied while writing, so the number
+	// describes what a reader of the graph will actually find — and counted
+	// through the same visibility filter the list route uses, because the card
+	// shows both numbers and a reader comparing them must not see one verdict
+	// before pressing the button and a different one after.
+	if refs, err := s.crossrefs.FindByResearch(ctx, researchID); err == nil {
+		refs = s.access.VisibleCrossRefs(ctx, refs)
+		report.References = len(refs)
+		for _, ref := range refs {
+			if !ref.Resolved {
+				report.Unresolved++
+			}
+		}
 	}
 
 	// The link tables this rewrites are what the graph and the mind map are
 	// drawn from, and nothing else announces the change — so both stayed on the
 	// previous link set until someone reloaded the page by hand.
 	emit(ctx, s.events, Event{Type: "crossrefs.rebuilt", ResearchID: researchID, EntityID: researchID, Entity: "crossref"})
-	return count, nil
+	return report, nil
+}
+
+// taskIndexText is the text a task contributes to the reference table.
+//
+// One definition, because the write path and the rebuild disagreeing about it
+// makes a reference flicker: whichever ran last decides whether the row exists.
+func taskIndexText(t *domain.Task) string {
+	return t.Description + "\n" + t.Result
+}
+
+// rebuildOtherSources rescans the sources that are not documents.
+//
+// Both repos are optional on this service — the narrower tests construct it
+// without them — so a missing one costs those sources rather than the rebuild.
+func (s *EntryService) rebuildOtherSources(ctx context.Context, researchID string) int {
+	n := 0
+	if s.tasks != nil {
+		if tasks, err := s.tasks.FindByResearch(ctx, researchID, storage.TaskFilter{}); err == nil {
+			for _, t := range tasks {
+				// Exactly what TaskService indexes, and no more. Adding the title
+				// here would create rows the next task edit deletes again —
+				// ReplaceForSource is a whole-source replacement — so a
+				// reference would appear and disappear depending on which write
+				// happened last, and the `unresolved` count would move with it.
+				s.parseCrossRefs(ctx, "task", t.ID, researchID, taskIndexText(t))
+				n++
+			}
+		}
+	}
+	if s.sessions != nil && s.questionRepo != nil {
+		if sessions, err := s.sessions.FindByResearch(ctx, researchID); err == nil {
+			for _, sess := range sessions {
+				qs, err := s.questionRepo.FindBySession(ctx, sess.ID, storage.QuestionFilter{})
+				if err != nil {
+					continue
+				}
+				for _, q := range qs {
+					if q.Answer == "" {
+						continue
+					}
+					s.parseCrossRefs(ctx, "question", q.ID, researchID, q.Answer)
+					n++
+				}
+			}
+		}
+	}
+	return n
 }
 
 // updateCrossRefs parses [[...]] references from entry content and stores them.
@@ -760,9 +860,13 @@ func (s *EntryService) resolveRefs(ctx context.Context, sourceType, sourceID, re
 		// anyone's work — and the reader, not the author, is who decides
 		// whether a resolved reference is shown: see Access.VisibleCrossRefs.
 		case "roadmap":
-			// [[RM1]] — link to a roadmap.
+			// [[RM1]] — link to a roadmap in this research.
+			//
+			// Scoped, because roadmap codes are allocated per research: an
+			// unscoped lookup returned whichever research happened to hold the
+			// first RM1, so one project's document named another's plan.
 			if s.roadmaps != nil {
-				rm, err := s.roadmaps.FindByCode(ctx, first)
+				rm, err := s.roadmaps.FindByCodeAndResearch(ctx, first, researchID)
 				if err == nil && rm != nil {
 					cr.TargetRoadmapID = rm.ID
 					cr.TargetResearchID = rm.ResearchID
@@ -770,9 +874,10 @@ func (s *EntryService) resolveRefs(ctx context.Context, sourceType, sourceID, re
 				}
 			}
 		case "node":
-			// [[RM1:N3]] — link to a specific node in a roadmap.
+			// [[RM1:N3]] — a node of a roadmap in this research. Scoped for the
+			// same reason as the roadmap above.
 			if s.roadmaps != nil && s.roadmapNodes != nil {
-				rm, err := s.roadmaps.FindByCode(ctx, first)
+				rm, err := s.roadmaps.FindByCodeAndResearch(ctx, first, researchID)
 				if err == nil && rm != nil {
 					cr.TargetRoadmapID = rm.ID
 					cr.TargetResearchID = rm.ResearchID
@@ -1223,3 +1328,8 @@ func redactEntriesForShare(ctx context.Context, entries []*domain.Entry) {
 		redactEntryForShare(ctx, e)
 	}
 }
+
+// SetQuestionRepo lets RebuildCrossRefs rescan the answers in a research.
+// `[[...]]` is extracted from an answer on write, so a rebuild that could not
+// read them left exactly those references broken while reporting success.
+func (s *EntryService) SetQuestionRepo(r *storage.QuestionRepository) { s.questionRepo = r }

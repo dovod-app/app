@@ -103,19 +103,35 @@ func TestCrossRefParsing_ForwardReference(t *testing.T) {
 		}
 	}
 
-	// Create E2
+	// Creating E2 resolves it, with no rebuild — that is the whole of P0-4, and
+	// crossref_forward_test.go is where it is covered properly. This test keeps
+	// the rebuild honest: it must still work, and must not undo the repair.
 	entrySvc.Create(ctx, CreateEntryRequest{
 		ResearchID: r.ID, SectionID: sections[0].ID,
 		Content: "# Second entry",
 	})
 
-	// Rebuild should resolve it
-	count, err := entrySvc.RebuildCrossRefs(ctx, r.ID)
+	refs, _ = crossrefRepo.FindByResearch(ctx, r.ID)
+	for _, ref := range refs {
+		if ref.SourceID == e1.ID && ref.TargetRef == "E2" && !ref.Resolved {
+			t.Error("creating the target did not resolve the forward reference")
+		}
+	}
+
+	report, err := entrySvc.RebuildCrossRefs(ctx, r.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Errorf("RebuildCrossRefs: got %d, want 2", count)
+	if report.Sources != 2 {
+		t.Errorf("RebuildCrossRefs sources: got %d, want 2", report.Sources)
+	}
+	// The number the API reports is references, not documents — it used to be
+	// documents under the name "rebuilt", and the spec called it references.
+	if report.References != 1 {
+		t.Errorf("RebuildCrossRefs references: got %d, want 1", report.References)
+	}
+	if report.Unresolved != 0 {
+		t.Errorf("RebuildCrossRefs unresolved: got %d, want 0", report.Unresolved)
 	}
 
 	refs, _ = crossrefRepo.FindByResearch(ctx, r.ID)
@@ -126,7 +142,7 @@ func TestCrossRefParsing_ForwardReference(t *testing.T) {
 		}
 	}
 	if !resolved {
-		t.Error("after rebuild, forward reference should be resolved")
+		t.Error("after rebuild, forward reference should still be resolved")
 	}
 }
 

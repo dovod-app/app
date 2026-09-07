@@ -85,6 +85,10 @@ func TestShareDelivery_IncludeFlagsFilterTheStream(t *testing.T) {
 		// only signal that they are still private working state.
 		{Type: "entry_view.updated", Entity: "entry_view", EntityID: "e1", ResearchID: "r1"},
 		{Type: "research.updated", Entity: "memory", EntityID: "private-note-id", ResearchID: "r1"},
+		// The reference index moves when a task or a roadmap is created, so a
+		// link excluding those was being told the second one appeared.
+		{Type: "crossrefs.resolved", Entity: "crossref", EntityID: "r1", ResearchID: "r1"},
+		{Type: "crossrefs.rebuilt", Entity: "crossref", EntityID: "r1", ResearchID: "r1"},
 	} {
 		hub.deliver(e)
 		if got, ok := received(t, visitor); ok {

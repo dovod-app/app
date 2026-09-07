@@ -43,9 +43,50 @@ func (h *CrossRefHandler) ListForResearch(w http.ResponseWriter, r *http.Request
 	refs = h.access.VisibleCrossRefs(r.Context(), refs)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"data":  refs,
-		"count": len(refs),
+		"data": refs,
+		// Counted after the visibility filter, so the number describes what this
+		// reader can actually see. A caller that wants only the health of the
+		// index would otherwise download the whole table to count one field.
+		"count":   len(refs),
+		"summary": crossRefSummary(refs),
 	})
+}
+
+// crossRefSummary is the health of a research's reference index, as this reader
+// sees it.
+//
+// `dangling` is capped: it exists to name the problem on a settings card, and a
+// research with three hundred broken references needs the count, not the list.
+// Deduplicated because one mistyped code is usually cited from several places,
+// and repeating it six times reads as six problems.
+func crossRefSummary(refs []domain.CrossRef) map[string]any {
+	const maxDangling = 12
+	unresolved := 0
+	seen := map[string]bool{}
+	dangling := []string{}
+	for _, ref := range refs {
+		if ref.Resolved {
+			continue
+		}
+		unresolved++
+		if seen[ref.TargetRef] {
+			continue
+		}
+		seen[ref.TargetRef] = true
+		if len(dangling) >= maxDangling {
+			continue
+		}
+		dangling = append(dangling, ref.TargetRef)
+	}
+	return map[string]any{
+		"total":      len(refs),
+		"unresolved": unresolved,
+		"dangling":   dangling,
+		// How many distinct codes there are, so a client can say "and more"
+		// truthfully. Without it the only overflow number available was the row
+		// count, which is a different unit from the list it would have followed.
+		"dangling_total": len(seen),
+	}
 }
 
 // GetForEntry returns outgoing and incoming cross-references for a specific entry,
@@ -191,14 +232,20 @@ func (h *CrossRefHandler) Rebuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := h.entrySvc.RebuildCrossRefs(r.Context(), researchID)
+	report, err := h.entrySvc.RebuildCrossRefs(r.Context(), researchID)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"rebuilt": count,
-		"status":  "ok",
+		// `rebuilt` is kept because it has been in the response since the route
+		// existed, but it now means what its name says. The three fields beside
+		// it are what a caller can act on.
+		"rebuilt":    report.References,
+		"sources":    report.Sources,
+		"references": report.References,
+		"unresolved": report.Unresolved,
+		"status":     "ok",
 	})
 }

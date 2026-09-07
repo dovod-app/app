@@ -244,7 +244,13 @@ onMounted(() => { if (contentEl.value) renderMermaidBlocks(contentEl.value) })
 useResearchRealtime(
   () => slug.value,
   (event) => {
-    if (event.entity === 'entry' || event.entity === 'crossref') void loadEntry()
+    // `crossref` stays in the list for a rebuild the owner runs, but a share no
+    // longer receives that entity — the event fires on task and roadmap creates
+    // too, so it was telling a visitor whose link excludes those that one had
+    // just appeared. `task` and `roadmap` take its place here: they are gated
+    // by the link's own include flags, so this repaints exactly when the
+    // visitor is entitled to know.
+    if (['entry', 'crossref', 'task', 'roadmap'].includes(event.entity)) void loadEntry()
   },
   { onResync: () => void loadEntry(), researchId: () => researchId.value },
 )

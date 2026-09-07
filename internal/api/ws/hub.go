@@ -403,6 +403,21 @@ func visibleToShare(share *auth.Share, event Event) bool {
 		// template.* event carrying a research id, this file is not where they
 		// will think to look.
 		return false
+	case "crossref":
+		// Never. The reference index moving says something happened in the
+		// research just then, and the creates that move it include tasks and
+		// roadmaps — the very parts a link's flags may exclude. A visitor whose
+		// link answers 404 for /tasks was being told, to the second, that a task
+		// had been created.
+		//
+		// It does cost something, and the cost is named rather than denied: the
+		// shared entry page reloads on this entity, so a reference resolved by a
+		// task or roadmap create no longer repaints there by way of this event.
+		// It repaints by way of `task.created` / `roadmap.created` instead —
+		// which reach a visitor only when their link includes those parts, which
+		// is exactly the right condition. See the handler in
+		// pages/s/[token]/entry/[entryId].vue.
+		return false
 	case "skill", "memory":
 		// Never. Which methodology a team follows is working process — the same
 		// class as `instruction` and `memory`, which no share has ever carried.

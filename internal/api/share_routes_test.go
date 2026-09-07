@@ -36,6 +36,7 @@ type shareServer struct {
 	entry    *domain.Entry
 	other    *domain.Research
 	shares   *service.ShareService
+	entries  *service.EntryService
 	ownerCtx context.Context
 	// roadmapID is a roadmap whose nodes point at a task and at a session, which
 	// is what the mindmap builds and what makes the include flags reachable
@@ -89,6 +90,13 @@ func newShareServer(t *testing.T) *shareServer {
 
 	annotationSvc := service.NewAnnotationService(storage.NewAnnotationRepository(db), entryRepo,
 		storage.NewEntryRevisionRepository(db), access, entrySvc, entrySvc, events, log)
+
+	// Creating a referenceable thing repairs the references that already named
+	// its code. main.go wires this; a fixture that does not is a fixture testing
+	// a different server.
+	researchSvc.SetDanglingResolver(entrySvc)
+	taskSvc.SetDanglingResolver(entrySvc)
+	roadmapSvc.SetDanglingResolver(entrySvc)
 
 	srv := NewServer(ServerConfig{Port: 0}, researchSvc, sectionSvc, entrySvc, sessionSvc, taskSvc,
 		roadmapSvc, exportSvc, obsidianSvc, teamSvc, shareSvc, skillSvc, templateSvc, annotationSvc, access, nil, db,
@@ -188,7 +196,7 @@ func newShareServer(t *testing.T) *shareServer {
 
 	return &shareServer{
 		t: t, mux: srv.mux, db: db, research: research, entry: entry,
-		other: other, shares: shareSvc, ownerCtx: ctx, roadmapID: roadmap.ID,
+		other: other, shares: shareSvc, entries: entrySvc, ownerCtx: ctx, roadmapID: roadmap.ID,
 		sessionID: sess.ID, sectionID: sections[0].ID,
 	}
 }

@@ -75,6 +75,112 @@ func (r *CrossRefRepository) ReplaceForSource(ctx context.Context, sourceType, s
 	return tx.Commit()
 }
 
+// DanglingMatch names one shape of reference that an entity just created would
+// satisfy.
+//
+// Two shapes exist because two code scopes do. An entry code is unique only
+// within its research, so `[[E20]]` may be resolved only against sources in the
+// same research — SourceResearchID carries that. A research, roadmap or node
+// code is global, so `[[RM1]]` and `[[R3:E20]]` are matched everywhere and
+// SourceResearchID is left empty. Getting that backwards is how one team's
+// `[[E20]]` starts pointing at another team's document.
+type DanglingMatch struct {
+	Ref string
+	// SourceResearchID restricts the match to references written inside one
+	// research. Required unless Global is set.
+	SourceResearchID string
+	// Global says this code carries its own scope — a research code, or a
+	// reference qualified by one — so any source anywhere may name it.
+	//
+	// A separate flag rather than "empty means global", which is how the first
+	// version of this was written and was wrong in the dangerous direction: the
+	// zero value of the field that decides tenancy meant *all* tenants, so a
+	// caller that simply forgot to set it rewrote every research's rows.
+	Global bool
+}
+
+// ResolveDangling points references that were written before their target
+// existed at the target that now does, and returns how many it repaired.
+//
+// This is the targeted half of RebuildCrossRefs. The rebuild re-reads every
+// document in the research and rewrites the whole table; this touches only rows
+// that are still unresolved and name exactly this code, which is what makes it
+// affordable on the hot path of every create.
+//
+// `resolved=0` in the predicate is not an optimisation. A resolved row already
+// points somewhere, and re-pointing it at a newly created entity with the same
+// code would silently move a link a reader had already followed.
+func (r *CrossRefRepository) ResolveDangling(ctx context.Context, matches []DanglingMatch, target domain.CrossRef) (int, error) {
+	if len(matches) == 0 {
+		return 0, nil
+	}
+
+	q := r.db.NewUpdate().
+		Table("crossrefs").
+		Set("resolved=?", 1).
+		Where("resolved=?", 0)
+
+	// Only the ids the caller actually knows. A roadmap has no entry id and an
+	// entry has no node id; writing NULL over a column this target says nothing
+	// about would erase what the resolver had already worked out.
+	if target.TargetEntryID != "" {
+		q = q.Set("target_entry_id=?", target.TargetEntryID)
+	}
+	if target.TargetResearchID != "" {
+		q = q.Set("target_research_id=?", target.TargetResearchID)
+	}
+	if target.TargetRoadmapID != "" {
+		q = q.Set("target_roadmap_id=?", target.TargetRoadmapID)
+	}
+	if target.TargetNodeID != "" {
+		q = q.Set("target_node_id=?", target.TargetNodeID)
+	}
+
+	// Counted before the query is built, because an empty WhereGroup adds
+	// nothing at all: bun returns early on a group with no conditions, and the
+	// statement would run as `WHERE resolved=0` over every tenant's rows —
+	// a stronger version of the cross-tenant bug this file exists to close.
+	usable := 0
+	for _, m := range matches {
+		if m.Global || m.SourceResearchID != "" {
+			usable++
+		}
+	}
+	if usable == 0 {
+		return 0, nil
+	}
+
+	q = q.WhereGroup(" AND ", func(g *bun.UpdateQuery) *bun.UpdateQuery {
+		for _, m := range matches {
+			if m.Global {
+				g = g.WhereOr("target_ref=?", m.Ref)
+				continue
+			}
+			// A scoped match with no research would widen to every research.
+			// Dropped here and counted above, so a slice of nothing but these
+			// never reaches the database at all.
+			if m.SourceResearchID == "" {
+				continue
+			}
+			g = g.WhereOr("target_ref=? AND source_research_id=?", m.Ref, m.SourceResearchID)
+		}
+		return g
+	})
+
+	res, err := q.Exec(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("resolve dangling crossrefs: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		// MySQL reports rows *changed* rather than matched, and some drivers
+		// decline the count entirely. The repair happened either way; the
+		// number is only ever used to decide whether to announce it.
+		return 0, nil
+	}
+	return int(n), nil
+}
+
 // FindByResearch returns all cross-references where the source belongs to the given research.
 func (r *CrossRefRepository) FindByResearch(ctx context.Context, researchID string) ([]domain.CrossRef, error) {
 	rows, err := r.db.NewSelect().

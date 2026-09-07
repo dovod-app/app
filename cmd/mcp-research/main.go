@@ -94,6 +94,8 @@ func main() {
 	entrySvc := service.NewEntryService(entryRepo, sectionRepo, researchRepo, access, sessionRepo, blockRepo, revisionRepo, crossrefRepo, externalLinkRepo, events, log)
 	entrySvc.SetRoadmapRepos(roadmapRepo, roadmapNodeRepo)
 	entrySvc.SetTaskRepo(taskRepo)
+	// So the last-resort rebuild reaches answers as well as documents.
+	entrySvc.SetQuestionRepo(questionRepo)
 	entrySvc.SetRevisionLimit(cfg.RevisionLimit)
 	sessionSvc := service.NewSessionService(db, sessionRepo, questionRepo, researchRepo, access, entrySvc, events, log)
 	taskSvc := service.NewTaskService(taskRepo, researchRepo, access, entrySvc, events, log)
@@ -104,6 +106,15 @@ func main() {
 	entrySvc.SetAnnotations(annotationRepo)
 	roadmapSvc := service.NewRoadmapService(roadmapRepo, roadmapNodeRepo, roadmapEdgeRepo, researchRepo, access, events, log)
 	roadmapSvc.SetRefResolvers(entryRepo, taskRepo, sessionRepo, questionRepo, sectionRepo)
+	// A reference written before its target existed is the normal order, not an
+	// edge case. Every service that brings a referenceable thing into being
+	// tells the reference table about it, so `[[E20]]` written yesterday points
+	// at E20 the moment E20 is created — rather than staying dangling until
+	// somebody found the rebuild route. Wired here because EntryService owns the
+	// table and is built after two of the three.
+	researchSvc.SetDanglingResolver(entrySvc)
+	taskSvc.SetDanglingResolver(entrySvc)
+	roadmapSvc.SetDanglingResolver(entrySvc)
 	exportSvc := service.NewExportService(researchSvc, sectionSvc, entrySvc, entryRepo, sessionSvc, taskSvc, roadmapSvc, log)
 	// A portable dump is a move, and a move that drops the marks discards the
 	// only record of what somebody did not believe.
