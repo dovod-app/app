@@ -630,9 +630,19 @@ The `research_export` MCP tool returns the same portable payload for a research 
 
 Import re-creates entities from scratch: new UUIDs, new short codes, cross-references re-parsed from the imported content.
 
-**Section declarations and document metadata do travel.** `field_spec` rides on
-the section and `metadata` on the entry, and an import restores both — otherwise
-an imported research would arrive as a pile of values nothing explains. Two
+**Section declarations, section instructions and document metadata do travel.**
+`field_spec` and `instruction` ride on the section and `metadata` on the entry,
+and an import restores all three — otherwise an imported research would arrive as
+a pile of values nothing explains and its next eighteen documents would be
+written from scratch again. The instruction is the one of the three that is
+otherwise unwritable at creation: `research_create` and `research_add_section`
+take none, so an import is the only path that lands a section already carrying
+one. An instruction over 500 runes in the file is **dropped rather than refused or
+truncated** — refusing a whole research over a note forty characters long would
+be the wrong trade, and half a rule reads like a whole one — but it is not
+dropped quietly: the import returns a `warnings` list naming the section, how
+long its instruction was and what to do about it, and `research_import` and
+`POST /api/researches/import` both carry that list back. Two
 consequences: a declaration the destination would not have accepted (a reserved
 key, a cap breached, an enum with no options) is dropped whole rather than
 enforced half-way, so the section lands as a plain topic and its documents' values
@@ -675,6 +685,7 @@ GET /api/shared/{token}/researches/{id}/export?format=obsidian
 Same handler, same payload shape as the authenticated route above, with four differences that are the point of the feature:
 
 - Private skills and memory are absent, along with `user_id` and every team field. Research reads redact memory and ownership; export code excludes private skills for a share context. No shared format carries them out.
+- **A share sees no section instruction.** How a team writes here is working process, like the memory beside it, and it is stripped from every section a share reads — including the sections of this export. (The rendered formats never print one for anybody: `format=md` and the vault carry the section's name and description, not its writing rule. Only the JSON export carries it, and only for a member.)
 - **A share sees neither document metadata nor the declaration behind it.** `field_spec` is stripped from every section a share reads and `metadata` from every entry, so the shared markdown renders no metadata block and the shared vault emits no user front-matter keys — both render *from* the declaration, and a share has none. A list of field labels with nothing in them still says what a team decided to track. See [Document Metadata](/llms/metadata.md).
 - `sessions` is empty unless the link includes sessions, and `tasks` unless it includes tasks. An export that carried the interview transcript would hand over in one file exactly what the creator chose to leave out of the pages.
 - `/export/portable` is not mounted under the prefix at all: it is a re-importable copy of the record rather than a reading of it. **Session export is not shared either** — only the research-scoped route is mounted.

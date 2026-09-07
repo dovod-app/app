@@ -158,7 +158,7 @@ answer from this API: that is the web UI, and a stale path used to return it.
 | Tool | Purpose |
 |------|---------|
 | `research_create` | Create research with sections, tags, and goal. Optional `team_id` picks the team it lands in; omitted, it goes to your personal team. Optional `template_slug` records the methodology you followed and attaches the skills it names |
-| `research_get` | Load full research context (sections with their `spec_version` and, where non-empty, `field_spec`; entry counts; active session; and the skills index when the research follows any) |
+| `research_get` | Load full research context (sections with their `spec_version` and, where non-empty, their `instruction` and `field_spec`; entry counts; active session; and the skills index when the research follows any) |
 | `research_resume` | The outstanding work: tasks in progress, blocked and pending, the open and deferred questions of one session, the marks a person left, the documents changed most recently, and up to three candidate next actions each carrying its reason and whether it is yours or a person's. Read-only — no session is created, no status moves, nothing is marked as seen. It carries no `memory`, `field_spec` or skills index: `research_get` owns those, and the two are meant to be called in that order |
 | `research_list` | List every research you can reach, with optional status filter. Marks a shared one with `team` and a read-only one with `access: "read-only"` |
 | `research_update` | Update metadata or append one note with `add_memory` and optional `session_id` |
@@ -222,8 +222,18 @@ You do the work; they accept it. [Annotations](/llms/annotations.md).
 
 | Tool | Purpose |
 |------|---------|
-| `section_list` | List sections for a research, each with `spec_version` and — only when the section declares any — the `field_spec` its documents record |
-| `section_update` | Update section display name, description, status, position, or `field_spec` (the slug `name` is immutable). The only way to declare fields: `research_create` and `research_add_section` take none |
+| `section_list` | List sections for a research, each with `spec_version` and — only when the section has one — its `instruction` (how to write a document here) and the `field_spec` its documents record |
+| `section_update` | Update section display name, description, status, position, `instruction` or `field_spec` (the slug `name` is immutable). The only way to set either: `research_create` and `research_add_section` take neither |
+
+**Read the section's `instruction` before writing into it.** It is how *this*
+section is written — "Name the producing service. State the consumer. One
+paragraph of rationale, then the payload." — and both `section_list` and
+`research_get` hand it to you, so nothing extra needs calling. It outranks the
+research's memory and any skill on the narrow question of what a document filed
+here looks like, and nothing wider than that. Writing one is `section_update`
+with at most 500 characters; longer is refused, not trimmed. Where the section
+also declares fields, the instruction names those keys. [Skills → Three places a
+rule can live](/llms/skills.md), [Document Metadata](/llms/metadata.md).
 
 ### Templates
 
@@ -376,7 +386,7 @@ Consequences:
 - **List filters are nullable**: `research_list.status`, `entry_list.status`, `question_list.status` / `area` / `priority`, `task_list.status` / `priority`, `annotation_list.status` / `kind` / `entry_id` / `limit` / `offset`. `null` or `""` means "no filter".
 - **The two annotation tools are in the ordinary regime**, not among the exceptions above: send every property. `annotation_list` carries one plain string (`research_id`) and five nullable filters, so the queue read is `research_id` plus five `null`s. `annotation_answer` carries two plain strings — `annotation_id` and `resolution`, neither of which may be `null` or empty — and one nullable `task_id`.
 - **`research_resume` is in the ordinary regime as well.** `research_id` is a plain string, and it does resolve an `R1` code; `session_id` and `limit` are nullable, so the ordinary call is the research plus two `null`s. `session_id: null` selects the one active session, or returns the candidates with `selection_required` when several are open — it never picks for you. `limit: null` is 5, and a number outside 1–15 is clamped rather than refused.
-- **`null` and empty are different for a replacing field.** `metadata` (`entry_update`) and `field_spec` (`section_update`) are nullable but not "empty means empty": `null` leaves what is stored alone, while `{}` clears every value and `[]` removes every declared field. Send `null` unless you mean to erase.
+- **`null` and empty are different for a replacing field.** `metadata` (`entry_update`), `field_spec` and `instruction` (`section_update`) are nullable but not "empty means empty": `null` leaves what is stored alone, while `{}` clears every value, `[]` removes every declared field and `""` removes the instruction. Send `null` unless you mean to erase.
 - **Inside a `field_spec` item**, `key`, `label`, `type` and `required` must be present. `repeated`, `options` and `help` may be omitted; if you do send them, `options` accepts `null` while `repeated` (boolean) and `help` (string) do not — send `false` and `""`.
 - Unknown property names are rejected outright (`additionalProperties: false`).
 
@@ -395,6 +405,7 @@ Consequences:
 | `metadata` (`entry_create`) | No values recorded. `entry_update`: the stored values are left as they are |
 | `allow_incomplete` (`entry_update`) | `false` — completing a document with required fields unanswered is refused |
 | `field_spec` (`section_update`) | The section's declaration is left as it is |
+| `instruction` (`section_update`) | The section's writing instruction is left as it is. `""` removes it; over 500 characters the whole call is refused rather than truncated |
 | `limit` (`entry_history`) | `20` newest revisions; the result says `truncated: true` when more exist |
 | `format` (`research_export`) | `portable` — the JSON `research_import` takes. `obsidian` returns a vault download link instead; `json` / `vault` / `zip` are accepted aliases, anything else is a validation error |
 | `team_id` (`research_create`, `research_import`) | Your personal team |
@@ -734,6 +745,10 @@ Two more habits worth having:
   before**, and read the existing documents. The first two or three entries in a
   section set the pattern for every one after, and the `help` line on a field
   says where its value is supposed to come from.
+- **The same payload may carry an `instruction`** — the section's own rule for
+  how a document here is written. Follow it for this document; it beats the
+  research's memory and any skill on that narrow question, and it does not reach
+  beyond it.
 
 See [Document Metadata](/llms/metadata.md).
 

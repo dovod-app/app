@@ -158,10 +158,22 @@ async function handleImportFile(event: Event) {
   try {
     const text = await file.text()
     const data = JSON.parse(text)
-    const result = await authFetch<{ research_id: string; code: string; name: string }>(
+    const result = await authFetch<{ research_id: string; code: string; name: string; warnings?: string[] }>(
       `${base}/api/researches/import`,
       { method: 'POST', body: data }
     )
+    // What the file carried and the import could not. A section whose writing
+    // instruction was over the limit arrives without one, and the person who
+    // just imported the file is the only one who can put it back — so the
+    // whole point of dropping rather than truncating is that somebody is told.
+    // Pushed before navigating, because the toast host survives the route
+    // change and the page does not.
+    for (const warning of result.warnings ?? []) {
+      // `info`, not `error`: the research imported and is usable. There is no
+      // `warning` variant, and inventing one for this is a bigger change than
+      // the message deserves.
+      useToasts().push({ variant: 'info', title: 'Imported with a change', message: warning, timeout: 0 })
+    }
     await navigateTo(`/research/${result.code}`)
   } catch (e: any) {
     useToasts().push({ variant: 'error', title: 'Import failed', message: e?.message || String(e), timeout: 0 })

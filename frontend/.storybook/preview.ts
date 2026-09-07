@@ -39,6 +39,8 @@ import AnnotationsKindChip from '../components/annotations/KindChip.vue'
 import AnnotationsAnchorBadge from '../components/annotations/AnchorBadge.vue'
 import AnnotationsAnnotationRow from '../components/annotations/AnnotationRow.vue'
 import AnnotationsAnnotationList from '../components/annotations/AnnotationList.vue'
+import ResearchSectionInstruction from '../components/research/SectionInstruction.vue'
+import ResearchSettingsInstructionEditor from '../components/research/settings/InstructionEditor.vue'
 import { resetMockApi, resetMockApiData } from '../__mocks__/api'
 import '../assets/css/tokens.css'
 import '../assets/css/base.css'
@@ -149,6 +151,15 @@ setup((app) => {
   app.component('AnnotationsAnnotationList', AnnotationsAnnotationList)
   // ThreadCard puts the note behind this rather than a bare textarea.
   app.component('EditableField', EditableField)
+  // The section instruction, on both surfaces that carry it, by the
+  // folder-prefixed name Nuxt derives. EntriesView draws the read block above
+  // the documents and FieldSpecList draws the editor under the field rows —
+  // and both are behind a `v-if`, so unregistered they are not an error but a
+  // section whose instruction has silently vanished from the catalogue. That
+  // is ea31ebb, and `mockSpecSection` now carries an instruction, so three
+  // existing EntriesView stories were already in that state.
+  app.component('ResearchSectionInstruction', ResearchSectionInstruction)
+  app.component('ResearchSettingsInstructionEditor', ResearchSettingsInstructionEditor)
 })
 
 const preview: Preview = {

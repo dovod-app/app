@@ -360,9 +360,14 @@ func TestRoadmapNodeRepository_Delete_CascadesEdges(t *testing.T) {
 		t.Fatalf("Create edge: %v", err)
 	}
 
+	// The same id through a roadmap it does not belong to is not a delete.
+	if gone, err := nodeRepo.DeleteFromRoadmap(ctx, uuid.New().String(), nodeA.ID); err != nil || gone {
+		t.Fatalf("DeleteFromRoadmap with a foreign roadmap: gone=%v err=%v", gone, err)
+	}
+
 	// Delete source node — edge should cascade
-	if err := nodeRepo.Delete(ctx, nodeA.ID); err != nil {
-		t.Fatalf("Delete node: %v", err)
+	if gone, err := nodeRepo.DeleteFromRoadmap(ctx, rm.ID, nodeA.ID); err != nil || !gone {
+		t.Fatalf("DeleteFromRoadmap: gone=%v err=%v", gone, err)
 	}
 
 	edges, err := edgeRepo.FindByRoadmap(ctx, rm.ID)

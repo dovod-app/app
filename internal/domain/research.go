@@ -45,6 +45,21 @@ type Research struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+// SectionInstructionMax caps how long a section's writing instruction may be,
+// counted in runes so a Cyrillic instruction is not worth half a Latin one —
+// the same fix skills.description already carries.
+//
+// 500 is not a storage budget, it is the mechanism. A per-folder "how to write
+// here" note is read once and then ignored unless it is three to six lines of
+// imperatives; the ones that get followed read like "Name the producing
+// service. State the consumer. One paragraph of rationale, then the payload."
+// Anything longer is summarised and diluted by the reader it was written for,
+// which for this field is an agent re-reading it on every write.
+//
+// It is a refusal, never a truncation: silently cutting an instruction in half
+// leaves a rule whose second sentence contradicts nothing because it is gone.
+const SectionInstructionMax = 500
+
 type SectionStatus string
 
 const (
@@ -63,6 +78,16 @@ type Section struct {
 	Description string        `json:"description"`
 	Status      SectionStatus `json:"status"`
 	Position    int           `json:"position"`
+	// Instruction says how to write a document in this section — three to six
+	// lines of imperatives, not an explanation of why the section exists. It is
+	// the most specific of the three methodology surfaces: the research's memory
+	// says what this research is, a skill says how a kind of work is done, and
+	// this says what a document here looks like. Most specific wins on a direct
+	// conflict, and it may not legislate beyond that.
+	//
+	// Working process, like the research's memory: stripped for a share visitor
+	// in redactSectionForShare.
+	Instruction string `json:"instruction"`
 	// FieldSpec is what documents in this section record. Empty is the normal
 	// case and means this section accepts no metadata at all — which is what
 	// lets a section that is a topic rather than a document class carry on

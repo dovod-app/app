@@ -77,6 +77,18 @@ carries the declaration with the section.)
   orphaned. Spell it that way on purpose or not at all.
 - `key` must match `^[a-z][a-z0-9_]*$`.
 
+**Say the same thing in the section's `instruction`.** The same call carries
+`instruction` — three to six lines of imperatives read before every document
+filed here, at most 500 runes, refused rather than truncated. Where a section
+declares fields, its instruction should name those keys: the declaration says
+which slots exist and what a valid value is, the instruction says how to arrive
+at one and what the prose around them must do. Left to drift, they end up
+describing the same document differently, which is the disagreement this whole
+feature exists to remove. Keep it to what a document *here* looks like —
+research-wide tone and methodology belong in the research's memory or in a
+[skill](/llms/skills.md), which is also where the precedence between the three
+is written down.
+
 ### Field types
 
 | `type` | Accepted value | Stored as |
@@ -119,9 +131,10 @@ cap people start encoding structure in field names (`contact_1`, `contact_2`) an
 metadata begins carrying content.
 
 `GET /api/metadata/schema` serves this table, the type catalogue and the reserved
-keys as JSON, so a client never carries a second copy that drifts. Two caps that
-belong to no field ride along in the same payload — `import_max_bytes` and
-`import_extensions`, the limits on a markdown file dropped into a section — for
+keys as JSON, so a client never carries a second copy that drifts. Three caps
+that belong to no field ride along in the same payload — `import_max_bytes` and
+`import_extensions`, the limits on a markdown file dropped into a section, and
+`instruction_max`, the 500 runes a section's writing instruction may run to — for
 the same reason: a number hard-coded in the frontend is a lie the day it changes
 on the server. See [Export](/llms/export.md).
 
@@ -252,7 +265,7 @@ claimed, which no other write does. See [Export](/llms/export.md).
 
 | Call | What you get |
 |---|---|
-| `section_list`, `research_get` | `spec_version` on every section, and `field_spec` **only when the section declares something** — an empty declaration is omitted rather than sent as `[]` |
+| `section_list`, `research_get` | `spec_version` on every section, `field_spec` **only when the section declares something** — an empty declaration is omitted rather than sent as `[]` — and `instruction` on the same terms, only when the section has one |
 | `entry_read`, `GET /api/entries/{id}` | the entry's `metadata`, its `spec_version`, and `metadata_status` |
 | `entry_list` | **neither.** It is deliberately content-free; read the entry to see its values |
 | `GET /api/metadata/schema` | the type catalogue, the caps and the reserved keys |

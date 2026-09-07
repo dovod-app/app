@@ -568,6 +568,10 @@ func FieldSchema() FieldSchemaInfo {
 			// changes on the server.
 			"import_max_bytes":  MaxImportFileBytes,
 			"import_extensions": []string{".md", ".markdown"},
+			// The section's writing instruction is edited on the same settings
+			// card as the field spec, beside the fields it is supposed to name,
+			// and its counter has to quote the number the server refuses on.
+			"instruction_max": SectionInstructionMax,
 		},
 	}
 }

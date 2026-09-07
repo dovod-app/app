@@ -36,6 +36,7 @@ type shareServer struct {
 	entry    *domain.Entry
 	other    *domain.Research
 	shares   *service.ShareService
+	sections *service.SectionService
 	ownerCtx context.Context
 	// roadmapID is a roadmap whose nodes point at a task and at a session, which
 	// is what the mindmap builds and what makes the include flags reachable
@@ -108,6 +109,14 @@ func newShareServer(t *testing.T) *shareServer {
 	}
 	if err := storage.NewResearchRepository(db).ImportProcess(ctx, research.ID, "internal working note", domain.Memory{{Text: "a memory the client must not read", Author: "unknown"}}, nil); err != nil {
 		t.Fatalf("set instruction: %v", err)
+	}
+	// How this team writes in this section: the same class of working process
+	// as the two above, and it rides on the section payload rather than on a
+	// route of its own.
+	if _, err := sectionSvc.Update(ctx, sections[0].ID, service.UpdateSectionRequest{
+		Instruction: strPtr("the house style a client must not read"),
+	}); err != nil {
+		t.Fatalf("set section instruction: %v", err)
 	}
 	entry, err := entrySvc.Create(ctx, service.CreateEntryRequest{
 		ResearchID: research.ID, SectionID: sections[0].ID,
@@ -188,7 +197,7 @@ func newShareServer(t *testing.T) *shareServer {
 
 	return &shareServer{
 		t: t, mux: srv.mux, db: db, research: research, entry: entry,
-		other: other, shares: shareSvc, ownerCtx: ctx, roadmapID: roadmap.ID,
+		other: other, shares: shareSvc, sections: sectionSvc, ownerCtx: ctx, roadmapID: roadmap.ID,
 		sessionID: sess.ID, sectionID: sections[0].ID,
 	}
 }
@@ -550,6 +559,7 @@ func TestShareRoutes_VaultObeysTheFlags(t *testing.T) {
 
 	for _, secret := range []string{
 		"internal working note",                    // the research instruction
+		"the house style a client must not read",   // the section instruction
 		"a memory the client must not read",        // the research memory
 		"internal todo",                            // a task, not included
 		"the session notes a client must not read", // a session, not included
@@ -916,6 +926,51 @@ func TestShareRoutes_RefusalsDoNotSayWhetherAResearchExists(t *testing.T) {
 		if b != bodies[0] {
 			t.Errorf("refusals differ, so the prefix says which researches exist:\n%q\n%q", bodies[0], bodies[i+1])
 		}
+	}
+}
+
+// A section's instruction says how this team writes here. It is working process
+// like the research's memory, and it rides on the section payload — which no
+// flag gates, which the shared page always fetches, and which the graph, the
+// export and the vault each build from again. So it is swept for across every
+// route the prefix mounts rather than asserted on the one that returns it.
+func TestShareRoutes_TheSectionInstructionIsNotOnAShare(t *testing.T) {
+	s := newShareServer(t)
+	token := s.newShare(allIn())
+	const secret = "the house style a client must not read"
+
+	for _, path := range []string{
+		// The bare token route first: it is what the shared page asks for
+		// before anything else, and its handler is the one that embeds
+		// *domain.Section verbatim. Replace its per-section count with a join
+		// on the repository and the redaction is gone with it.
+		"/api/shared/" + token,
+		"/api/shared/" + token + "/researches/" + s.research.ID,
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/entries",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/sections/" + s.sectionID + "/entries",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/graph",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/export",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/export?format=md",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/tags",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/crossrefs",
+		"/api/shared/" + token + "/researches/" + s.research.ID + "/links",
+		"/api/shared/" + token + "/entries/" + s.entry.ID,
+	} {
+		code, body := s.get(path)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, code, body)
+		}
+		if strings.Contains(body, secret) {
+			t.Errorf("%s carried the section instruction", path)
+		}
+	}
+
+	// The owner still reads it. Redaction is per reader, not a deletion — and
+	// an assertion that the string is absent everywhere proves nothing unless
+	// the string is somewhere.
+	sec, err := s.sections.Get(s.ownerCtx, s.sectionID)
+	if err != nil || sec.Instruction != secret {
+		t.Fatalf("the owner lost the instruction the visitor must not see: %+v %v", sec, err)
 	}
 }
 

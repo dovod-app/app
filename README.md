@@ -81,8 +81,9 @@ that conversation ends; work continues when you ask an assistant to resume it.
   Each reader has their own queue of new and changed documents.
 - **Tasks and plans.** A task board, roadmaps, a project mind map, and a
   knowledge graph of cross-references.
-- **Context for later work.** Private skills, memory, reusable methodology,
-  and a continuation summary that points to unfinished work.
+- **Context for later work.** Private skills, memory, per-section writing
+  instructions, reusable methodology, and a continuation summary that points
+  to unfinished work.
 
 ### Start with a methodology
 
@@ -99,16 +100,27 @@ and attach reusable skills for work such as interviewing or grading evidence.
 See the [methodology catalogue](internal/docs/templates.md) and
 [skills guide](internal/docs/skills.md).
 
-Project-specific rules live in private skills; reusable methodology lives in
-team or built-in skills. Legacy `instruction` text is migrated losslessly to
-an attached private skill marked for trigger review.
+A rule about how to work belongs in the most specific place that fits, and the
+most specific one wins: the project's memory says what *this project* is, a
+skill says how a *kind of work* is done, and a section's instruction says how
+to write a document *in that section*. Project-specific rules live in private
+skills; reusable methodology lives in team or built-in skills. A section
+instruction is a few imperatives, capped at 500 characters, that the assistant
+reads before every document it files there and you see above that section's
+document list — add one in **Settings → Sections**, beside the fields that
+section declares.
+
+Legacy project-level `instruction` text is migrated losslessly to an attached
+private skill marked for trigger review.
 
 When upgrading an existing installation, take a database backup first. The
 migration replaces legacy memory and instruction columns; reverting to an older
 binary requires restoring that backup. API clients must use structured memory
 items: append with `add_memory`, edit/delete by item ID with `research_memory`
-or the REST memory routes. Whole-array `memory` writes and `instruction` writes
-are rejected. Portable exports use version 2; version 1 imports remain supported.
+or the REST memory routes. Whole-array `memory` writes and project-level
+`instruction` writes are rejected; a section's instruction is a separate field,
+written with `section_update` or `PUT /api/sections/{id}`. Portable exports use
+version 2; version 1 imports remain supported.
 See the [database upgrade guide](docs/databases.md) for deployment and rollback steps.
 
 ### Share the result
@@ -121,9 +133,9 @@ choose whether they also include sessions, tasks, roadmaps, and export, and you
 can change that choice later on a link people already hold, without issuing a
 new address.
 
-Private skills, memory, revision history, and review marks stay out of public
-share links, and the shared graph and mind map leave out whatever the link does
-not include.
+Private skills, memory, section instructions, revision history, and review
+marks stay out of public share links, and the shared graph and mind map leave
+out whatever the link does not include.
 
 ## Get started
 
@@ -369,6 +381,8 @@ The same guides are available in this repository:
 - [Review marks](internal/docs/annotations.md) and [revision history](internal/docs/revisions.md)
 - [Block documents](internal/docs/blocks.md) and [HTML artifacts](internal/docs/artifacts.md)
 - [Tasks](internal/docs/tasks.md), [roadmaps](internal/docs/roadmaps.md), and [exports](internal/docs/export.md)
+- [Document metadata](internal/docs/metadata.md) — the fields a section declares, beside its instruction
+- [Conducting a project](internal/docs/conducting-research.md) — the step-by-step guide an assistant follows
 
 The API calls projects `research` and documents `entry`. Existing tool names,
 routes, short codes, and integrations keep working with those identifiers.
