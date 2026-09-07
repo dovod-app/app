@@ -76,6 +76,21 @@
            route behind it is a write. There is no share twin of this page, so
            "never on a share" is true by construction rather than by a guard. -->
       <ResearchSettingsMaintenanceCard v-if="canWrite" :research-id="id" />
+
+      <!-- Last on the page, and after maintenance: everything above repairs the
+           project, this one ends it. Owner only, and absent rather than
+           disabled — TeamViewerNotice at the top already explains missing
+           controls once. -->
+      <DangerZone v-if="canAdmin" lead="Deleting a project cannot be undone.">
+        <DangerRow
+          label="Delete project"
+          :note="deleteNote"
+          action-label="Delete"
+          busy-label="Deleting…"
+          :busy="del.busy.value"
+          @action="openDelete"
+        />
+      </DangerZone>
     </div>
 
     <!-- Skills -->
@@ -159,6 +174,8 @@
         :reserved-keys="reservedKeys"
         :on-save="saveFieldSpec"
         :on-save-instruction="saveInstruction"
+        :on-delete="canWrite ? deleteSection : undefined"
+        :research-slug="researchSlug"
       />
     </div>
 
@@ -179,6 +196,21 @@
   >
     <NuxtLink :to="{ name: 'index' }" class="btn btn-primary">Back to projects</NuxtLink>
   </EmptyState>
+
+  <ResearchDeleteResearchDialog
+    v-if="research"
+    :visible="deleteOpen"
+    :code="research.code"
+    :name="research.name"
+    :summary="del.summary.value"
+    :loading="del.loading.value"
+    :summary-failed="del.summaryFailed.value"
+    :busy="del.busy.value"
+    :failure="del.failure.value"
+    :permanently-refused="del.permanentlyRefused.value"
+    @cancel="deleteOpen = false"
+    @confirm="confirmDelete"
+  />
 </template>
 
 <script setup lang="ts">
@@ -190,8 +222,60 @@ const { data: researchData, pending } = await useApi<any>(`/api/researches/${id}
 const research = computed(() => researchData.value?.data?.research)
 const researchSlug = computed(() => research.value?.code || id)
 
-const { canWrite, readOnlyReason, setFromResearch } = useResearchRole()
+const { canWrite, canAdmin, readOnlyReason, setFromResearch } = useResearchRole()
 watch(research, r => setFromResearch(r), { immediate: true })
+
+/* --- Deleting the project --- */
+const del = useResearchDelete()
+const deleteOpen = ref(false)
+
+/* The same sentence the dialog builds its list from — one entity table in
+   useResearchDelete, so adding an entity to the cascade updates both surfaces.
+   Written twice, they had already drifted: this row counted neither roadmaps
+   nor marks. */
+const deleteNote = computed(() => {
+  if (del.summaryFailed.value) {
+    return 'Deletes the project and everything filed under it. This cannot be undone.'
+  }
+  if (!del.summary.value) return undefined
+  return deletionSentence(del.summary.value)
+})
+
+/* The row's sentence needs the counts before anything is clicked, so they are
+   fetched once the project arrives — but only for the person who can act on
+   them. Opening the dialog refetches, because that is the number somebody is
+   about to make a decision on. */
+watch(
+  () => [research.value?.id, canAdmin.value] as const,
+  ([id, admin]) => {
+    if (id && admin) void del.loadSummary(researchSlug.value)
+  },
+  { immediate: true },
+)
+
+function openDelete() {
+  deleteOpen.value = true
+  del.failure.value = null
+  del.permanentlyRefused.value = false
+  void del.loadSummary(researchSlug.value)
+}
+
+async function confirmDelete() {
+  const name = research.value?.name ?? 'The project'
+  const outcome = await del.remove(researchSlug.value)
+  if (outcome === 'failed') return
+  deleteOpen.value = false
+  await router.push({ name: 'index' })
+  if (outcome === 'already-gone') {
+    // Neutral: a 404 also means the caller lost access, and the project
+    // may be alive and in use.
+    toasts.push({ variant: 'info', title: 'No longer available', message: `“${name}” is no longer available here.` })
+  } else {
+    // No undo action: there is none, and a toast implying one is the single
+    // worst thing this feature could ship.
+    toasts.push({ variant: 'success', title: 'Project deleted', message: `“${name}” and everything in it has been removed.` })
+  }
+}
 
 /* The tab lives in the query string so a link can point at one, and it is
    replaced rather than pushed: Back should leave the page, not walk the tabs. */
@@ -314,6 +398,25 @@ onMounted(async () => {
     // a reserved key before the server does.
   }
 })
+
+/* Never sends `force`. The component refuses a section holding documents and
+   says so in visible text; the force path exists for the API and MCP, where the
+   caller is explicit by construction. Adding a "delete anyway" here would
+   re-create the accident the refusal prevents. */
+async function deleteSection(sectionId: string) {
+  const section = sections.value.find((s: any) => s.id === sectionId)
+  const outcome = await deleteEntity(
+    authFetch,
+    `${base}/api/sections/${sectionId}`,
+    'section',
+    toasts,
+    section?.display_name || section?.name,
+  )
+  // A section somebody else already deleted still has to leave this list.
+  if (outcome !== 'failed') {
+    researchData.value = await authFetch<any>(`${base}/api/researches/${id}`)
+  }
+}
 
 async function saveFieldSpec(sectionId: string, spec: any[]) {
   await authFetch(`${base}/api/sections/${sectionId}`, {

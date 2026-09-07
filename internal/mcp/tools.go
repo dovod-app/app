@@ -10,6 +10,8 @@ func (s *Server) registerTools() {
 	tools.RegisterResearchGet(s.server, s.research, s.section, s.session, s.skill, s.log)
 	tools.RegisterResearchList(s.server, s.research, s.log)
 	tools.RegisterResearchUpdate(s.server, s.research, s.log)
+	tools.RegisterResearchDeletePreview(s.server, s.research, s.log)
+	tools.RegisterResearchDelete(s.server, s.research, s.log)
 	tools.RegisterResearchMemory(s.server, s.research)
 	tools.RegisterResearchAddSection(s.server, s.research, s.log)
 	// Read-only, and next to research_get on purpose: one carries the
@@ -19,6 +21,7 @@ func (s *Server) registerTools() {
 	// Section tools
 	tools.RegisterSectionList(s.server, s.section, s.log)
 	tools.RegisterSectionUpdate(s.server, s.section, s.log)
+	tools.RegisterSectionDelete(s.server, s.section, s.log)
 
 	// Entry tools
 	tools.RegisterEntryCreate(s.server, s.entry, s.log)
@@ -37,10 +40,12 @@ func (s *Server) registerTools() {
 	tools.RegisterSessionCreate(s.server, s.session, s.log)
 	tools.RegisterSessionGet(s.server, s.session, s.log)
 	tools.RegisterSessionUpdate(s.server, s.session, s.log)
+	tools.RegisterSessionDelete(s.server, s.session, s.log)
 
 	// Question tools
 	tools.RegisterQuestionCreate(s.server, s.session, s.log)
 	tools.RegisterQuestionUpdate(s.server, s.session, s.log)
+	tools.RegisterQuestionDelete(s.server, s.session, s.log)
 	tools.RegisterQuestionList(s.server, s.session, s.log)
 
 	// Task tools

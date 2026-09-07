@@ -48,6 +48,15 @@ export function revocationCopy(r: Revocation) {
         short: `“${r.name}” was moved to a team you are not a member of.`,
         long: `“${r.name}” was moved to a team you are not a member of. Ask an owner of that team to invite you.`,
       }
+    case 'research_deleted':
+      // Not "you no longer have access": nobody does, and telling a reader
+      // their access ended sends them to ask for it back from someone who
+      // cannot give it. What ended is the project.
+      return {
+        title: `“${r.name}” has been deleted`,
+        short: `“${r.name}” was deleted, along with everything in it.`,
+        long: `“${r.name}” was deleted by an owner, along with everything filed under it. This cannot be undone.`,
+      }
     case 'team_deleted':
       return {
         title: `The team ${r.name} no longer exists`,
@@ -150,6 +159,29 @@ export function useAccessRevoked() {
 
     if (event.type === 'access.changed') {
       republishRole()
+      return
+    }
+    // A deleted project is the same situation as a revoked one from the
+    // reader's side — the page they are on has nothing behind it any more —
+    // and it reuses this notice rather than growing a second one that would
+    // have to re-learn the unsaved-work handling. It is routed here, and not
+    // emitted as access.revoked by the server, because the copy differs: their
+    // access did not end, the project did.
+    if (event.type === 'research.deleted') {
+      // Not at the person who pressed Delete. The event is emitted before the
+      // response and directed at every member including the actor, so without
+      // this the deleting tab could paint "was deleted by an owner" at itself
+      // for a frame — or, with an editor open on the page, raise the sticky
+      // no-timeout toast that follows them to the list and never dismisses.
+      if (isSelf(event)) return
+      const deleted: Revocation = {
+        scope: 'research',
+        id: event.entity_id,
+        code: event.research_code,
+        name: event.name || 'this project',
+        reason: 'research_deleted',
+      }
+      if (onThisPage(deleted)) show(deleted)
       return
     }
     if (event.type !== 'access.revoked') return

@@ -498,7 +498,16 @@ func forgetOn(event Event) bool {
 		strings.HasPrefix(event.Type, "team.") ||
 		event.Type == "research.transferred" ||
 		event.Type == "access.revoked" ||
-		event.Type == "access.changed"
+		event.Type == "access.changed" ||
+		// A deleted research changes who may read it in the most complete way
+		// there is, and the cache is what stops that being noticed: the delete
+		// emits one plain event *and* one directed event per member, on the
+		// understanding that the plain one is refused when accounts are on.
+		// With a verdict cached from any event in the last minute — an entry
+		// save, a task moved — it is not refused, and every member is told
+		// twice. Twice is not cosmetic here: the notice it raises is a toast
+		// with no timeout.
+		event.Type == "research.deleted"
 }
 
 // verdictCache remembers "may this user read this research" for a moment.

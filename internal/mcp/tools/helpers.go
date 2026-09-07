@@ -184,3 +184,12 @@ func derefInt(n *int) int {
 	}
 	return *n
 }
+
+// derefBool reads an optional boolean. Absent and false mean the same thing for
+// every flag this package has: the safe default is always "no".
+func derefBool(b *bool) bool {
+	if b == nil {
+		return false
+	}
+	return *b
+}

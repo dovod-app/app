@@ -53,6 +53,14 @@ type Event struct {
 	// messages that the normal scope cannot deliver, such as telling somebody
 	// they have just lost access.
 	TargetUserID string
+
+	// ResearchCode is normally left empty: the hub resolves it from ResearchID,
+	// so no call site has to carry it. Set it when the research will not be
+	// there to look up by the time the hub asks — which is exactly the deletion
+	// event, and which matters because every link in the web UI is built from
+	// the code, so a list that only knows `R7` cannot act on an event that only
+	// says `9f3c…`.
+	ResearchCode string
 }
 
 // emit stamps the event with who caused it and hands it on.

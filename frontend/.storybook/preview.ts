@@ -23,6 +23,9 @@ import EntryUpdateBadge from '../components/entry/UpdateBadge.vue'
 import ResearchUpdatesRow from '../components/research/UpdatesRow.vue'
 import ShortCode from '../components/ShortCode.vue'
 import ActionMenu from '../components/ActionMenu.vue'
+import ConfirmModal from '../components/ConfirmModal.vue'
+import TeamChip from '../components/team/TeamChip.vue'
+import TeamViewerNotice from '../components/team/ViewerNotice.vue'
 import ModalHeader from '../components/ModalHeader.vue'
 import TeamRoleSelect from '../components/team/RoleSelect.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -42,6 +45,8 @@ import AnnotationsAnnotationList from '../components/annotations/AnnotationList.
 import ResearchSectionInstruction from '../components/research/SectionInstruction.vue'
 import ResearchSettingsInstructionEditor from '../components/research/settings/InstructionEditor.vue'
 import { resetMockApi, resetMockApiData } from '../__mocks__/api'
+import { resetMockDownload } from '../__mocks__/download'
+import { resetMockAuth } from '../__mocks__/auth'
 import '../assets/css/tokens.css'
 import '../assets/css/base.css'
 import '../assets/css/brand.css'
@@ -92,6 +97,18 @@ setup((app) => {
   app.component('ResearchUpdatesRow', ResearchUpdatesRow)
   app.component('ShortCode', ShortCode)
   app.component('ActionMenu', ActionMenu)
+  // Three components raise a confirmation through this without importing it,
+  // and FieldSpecList is the newest. Unregistered, the destructive button is still
+  // there and still pressable and simply nothing happens — a delete flow whose
+  // catalogue entry says the confirmation does not exist.
+  app.component('ConfirmModal', ConfirmModal)
+  // ResearchCard names both of these in its footer, under the folder-prefixed
+  // name Nuxt derives (`team/TeamChip.vue` deduplicates to `TeamChip`). Without
+  // them the four stories written to show a shared team, and the one written to
+  // show a viewer's read-only marker, rendered a card with an empty tag row —
+  // each silently documenting the opposite of its own doc comment.
+  app.component('TeamChip', TeamChip)
+  app.component('TeamViewerNotice', TeamViewerNotice)
   app.component('ModalHeader', ModalHeader)
   app.component('TeamRoleSelect', TeamRoleSelect)
   app.component('StatusBadge', StatusBadge)
@@ -220,6 +237,8 @@ const preview: Preview = {
       setup: () => {
         resetMockApi()
         resetMockApiData()
+        resetMockDownload()
+        resetMockAuth()
       },
       template: `
         <div style="background: var(--color-bg); color: var(--color-text); padding: 1.5rem; font-family: 'Outfit', system-ui, sans-serif;">

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// The SSE transport is the second door into the same 52 tools, on its own
+// The SSE transport is the second door into the same tool surface, on its own
 // listener. It used to be guarded only when accounts were on — so an instance
 // configured with `api_token` and no accounts refused an anonymous
 // `POST /api/entries` and then handed the same caller a working MCP session on

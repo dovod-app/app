@@ -335,7 +335,11 @@ watch(activeSection, (val) => {
 })
 
 watch(sections, (secs) => {
-  if (!activeSection.value && secs.length) activeSection.value = secs[0].id
+  // Also when the current one is gone: a section deleted in another tab left
+  // `activeSection` holding a dead id, so the page fell through to "Select a
+  // section" with no explanation and a `?section=` that repeated it on reload.
+  const stillThere = secs.some((s: any) => s.id === activeSection.value)
+  if ((!activeSection.value || !stillThere) && secs.length) activeSection.value = secs[0].id
 }, { immediate: true })
 
 const currentSection = computed(() =>

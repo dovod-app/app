@@ -14,3 +14,9 @@ bin/*
 # Claude Code
 .claude/settings.local.json
 .claude/worktrees/
+
+# A session's own harness — preview configs, probe scripts, handoff notes.
+# The two design specs already tracked under .scratch/ stay; these are local by
+# nature and would only rot in the history.
+.scratch/preview/
+.scratch/handoff-*.md

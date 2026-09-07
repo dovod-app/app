@@ -28,6 +28,7 @@ func (n *HubNotifier) Notify(event service.Event) {
 		Reason:        event.Reason,
 		Name:          event.Name,
 		TargetUserID:  event.TargetUserID,
+		ResearchCode:  event.ResearchCode,
 		At:            time.Now().UnixMilli(),
 	})
 }

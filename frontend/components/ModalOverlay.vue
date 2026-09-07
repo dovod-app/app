@@ -37,6 +37,18 @@ const props = defineProps<{
    * fallthrough attribute, because the component's root is a Teleport.
    */
   labelledby?: string
+  /**
+   * Selector for the control that should hold focus when the dialog opens,
+   * queried inside the card.
+   *
+   * Without it the overlay focuses the first focusable element, which in a
+   * dialog with a header is the close button — and a child that focuses its own
+   * field in its own `visible` watcher loses the race with this one: the parent
+   * instance registers first, so its continuation runs last and moves focus
+   * away again. A child cannot win that on its own, which is why this is a prop
+   * rather than something each dialog solves for itself.
+   */
+  initialFocus?: string
 }>()
 
 defineEmits<{ close: [] }>()
@@ -106,10 +118,14 @@ watch(
     if (open) {
       restoreTo = document.activeElement as HTMLElement | null
       await nextTick()
-      // The first control, or the dialog itself when it holds none — either way
-      // focus is inside, so the first Tab continues from here.
+      // The named control if the caller asked for one, else the first, else the
+      // dialog itself — either way focus is inside, so the first Tab continues
+      // from here.
       const items = focusable()
-      ;(items[0] ?? card.value)?.focus()
+      const wanted = props.initialFocus
+        ? card.value?.querySelector<HTMLElement>(props.initialFocus)
+        : null
+      ;(wanted ?? items[0] ?? card.value)?.focus()
       return
     }
     restoreTo?.focus?.()

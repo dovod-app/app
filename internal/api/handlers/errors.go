@@ -52,7 +52,11 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrNoAuth):
 		writeError(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, service.ErrAlreadyMember),
-		errors.Is(err, service.ErrConflict):
+		errors.Is(err, service.ErrConflict),
+		// 409 rather than 400: the request is well formed and the caller is
+		// allowed to make it — the section's contents are what refuse, and
+		// `force=true` is the retry that succeeds.
+		errors.Is(err, service.ErrSectionNotEmpty):
 		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, service.ErrInviteInvalid),
 		errors.Is(err, service.ErrInvalidRole),

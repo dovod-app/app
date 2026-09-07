@@ -332,6 +332,21 @@ func TestRoles_ViewerCannotWriteAnything(t *testing.T) {
 			return errors.New("seeded node not returned")
 		},
 		"roadmap delete": func(ctx context.Context) error { return k.roadmap.Delete(ctx, rm.ID) },
+
+		// The deletes. Every one of these is listed because the gap this matrix
+		// exists to catch is an operation nobody thought to add to it — that is
+		// how `roadmap remove nodes` came to be able to delete another team's
+		// nodes. Each call is refused, so none of them disturbs the fixture the
+		// others share, whatever order the map iterates in.
+		"section delete": func(ctx context.Context) error { return k.section.Delete(ctx, section.ID, false) },
+		"section delete forced": func(ctx context.Context) error {
+			return k.section.Delete(ctx, section.ID, true)
+		},
+		"session delete":  func(ctx context.Context) error { return k.session.Delete(ctx, sess.ID) },
+		"question delete": func(ctx context.Context) error { return k.session.DeleteQuestion(ctx, questions[0].ID) },
+		// Refused for an editor too, and that is asserted separately — this
+		// matrix only says a viewer cannot.
+		"research delete": func(ctx context.Context) error { return k.research.Delete(ctx, research.ID) },
 	}
 
 	for name, call := range writes {

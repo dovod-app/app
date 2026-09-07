@@ -34,6 +34,11 @@ Top-level container for an investigation project. Owned by a [team](#team) when 
 - `template_slug` and `template_version` are written once, by `research_create` with a `template_slug`, and never again — no tool or route updates them, and `POST /api/researches` has no such field. They record what was followed, not what governs: the methodology text lives in the [template](#template) and the how-to-work text in the [skills](#skill) it attached.
 - `team_name`, `team_is_personal` and `role` are computed per request and returned by `research_get`, `GET /api/researches/{id}` and `GET /api/researches`. They are not stored and are ignored on input.
 - Moving a research between teams is `POST /api/researches/{id}/transfer` — there is no MCP tool for it, and it is the only way a research changes audience.
+- **A research ends one of two ways, and only one of them is reversible.** `status: archived` puts it out of the way and can be undone. `research_delete` / `DELETE /api/researches/{id}` destroys it: no tombstone, no trash, no restore. Archiving is almost always what "we're done with this" means.
+- **Deleting takes everything under the research with it** — sections, entries and every revision of them, sessions, questions, tasks, roadmaps with their nodes and edges, annotations, the personal read state, `research_memory`, share links (which stop answering at once) and the attached [skills](#skill), the research-private ones destroyed and the team and built-in ones merely no longer followed. It runs in one transaction: there is no half-deleted research.
+- **What survives is the references other researches made into it.** A `[[R1:E5]]` in R2 keeps its text and stops resolving — see [CrossRef](#crossref).
+- **Only an `owner` may delete.** An `editor` is trusted with the contents and not with the existence: deleting destroys work belonging to everybody else in the team. An editor gets `403`, a non-member `404`.
+- `research_delete_preview` / `GET /api/researches/{id}/delete-preview` counts what would go — `{sections, entries, sessions, questions, tasks, roadmaps, annotations, shares, incoming_refs, incoming_from}`, the last naming up to ten citing researches by `code` and `name`. It is a **read**: any member who can open the research can see it, including a `viewer` who may not delete, because the confirmation has to be able to say what the control they cannot use would do.
 
 **The continuation summary.** `research_resume` and `GET /api/researches/{id}/resume`
 answer one question — a new chat has opened on this research, what is unfinished?
@@ -233,6 +238,7 @@ That list is the whole surface. Anything else under the prefix — another metho
 - Revision history and search — neither route exists under the prefix. The knowledge graph does, with the node types the flags do not cover withheld inside the handler as described above. The mindmap is not a route in either direction: it is assembled in the browser from the research, its sections and documents, its sessions, tasks and cross-references, so a link narrows the mind map by narrowing those.
 - The continuation summary. `/api/researches/{id}/resume` is not mounted under the prefix, and `ResumeService` refuses a share context before it resolves anything — ahead of `Access.Read`, which would allow it, since a share does resolve to `viewer` on this very research. What is unfinished, what a person disputed and what the agent should do next is working process, like private skills.
 - Every write, without exception. `Access.Write` refuses a share context before it looks at any role, so this does not depend on the `viewer` it resolves to.
+- Every delete, for the same reason and one more: `Access.Admin`, the gate on `research_delete`, refuses a share context in its own line before resolving a role. A link is a capability to read one research and can never dispose of it. When the owner deletes the research, the share rows go with it: the token stops resolving and answers the same 404 as a revoked one.
 
 **Cross-references** out of the shared research (`[[R2:E5]]`) render as inert text — not a link, not a 404, because a share must not confirm that R2 exists. An *incoming* reference from a research the visitor cannot open is dropped from the list rather than blanked: the stripped row would still announce that something unseen cites this entry.
 
@@ -271,6 +277,8 @@ Logical division within a research. Organizes entries by topic.
 - `instruction` is settable the same two ways and nowhere else, with the same import exception — where an over-long one is dropped rather than refused, and named in the import's `warnings` so the loss is visible. `null` leaves it alone and `""` removes it; over REST the property may also simply be left out, while the `section_update` schema requires it like every other property, so send `null` there. Over 500 runes it is **refused**, never truncated — `instruction must be 500 characters or fewer…`, a `400` over REST — because half a rule reads like a whole one.
 - **An instruction says what a document here looks like and nothing wider.** The research's memory says what *this research* is, a [skill](#skill) says how a *kind of work* is done, and this says how to write in this section; most specific wins on a direct conflict. An instruction restating research-wide tone or methodology is misfiled. Where the section also declares `field_spec`, the instruction should name those keys, or the two end up describing the same document differently. See [Skills → Three places a rule can live](/llms/skills.md) and [Document Metadata](/llms/metadata.md).
 - `section_list` and `research_get` return `spec_version` on every section, and `field_spec` and `instruction` only when they are non-empty. REST section payloads carry `instruction` always, as `""` when there is none.
+- **Deleting a section is refused while it holds documents.** `section_delete` / `DELETE /api/sections/{sectionId}` answers `section is not empty: N document(s) would be deleted with it` — a `409` over REST, naming the count — unless `force=true`, which deletes them with it. Permanent, like every delete here.
+- **A document cannot be moved between sections**, by any tool or route: `section_id` is set at `entry_create` and read-only afterwards. So there is no way to empty a section except by deleting its documents, and "empty it first" is not a gentler path.
 
 ---
 
@@ -386,6 +394,7 @@ Interactive Q&A interview workflow. How knowledge enters the system.
 - **Multiple sessions are normal** — each focuses on different aspects (initial exploration, deep-dive, follow-up).
 - Use `add_note` to log decisions and pivots during the session. Notes support markdown and `[[...]]` cross-references.
 - Create entries when enough material accumulates from Q&A. Set `session_id` on entries to track provenance.
+- **Deleting a session destroys its questions and their answers, and keeps the documents.** `session_delete` / `DELETE /api/sessions/{id}` sets `session_id` to `NULL` on every entry written during it — a finding is not an artefact of the conversation that produced it — so what is lost is the transcript, not the conclusions. `status: completed` is the way to close a session without destroying it.
 
 **Typical session progression:**
 1. Create session with 3-8 initial questions
@@ -424,6 +433,7 @@ Structured Q&A prompt within a session.
 - `area` enables filtering by section focus.
 - Question text, answers, and rationale all support cross-references (`[[E3]]`).
 - Answers support full markdown formatting.
+- **Deleting a question keeps its follow-ups.** `question_delete` / `DELETE /api/questions/{questionId}` clears `parent_id` on the replies rather than taking them with it, and removes the cross-references and external links its answer wrote. For a question that turned out not to be worth asking, `status: skipped` keeps the record of having considered it, which is usually what a reader wants.
 
 ---
 
@@ -716,6 +726,15 @@ Only the qualified forms are matched across researches — `[[R3:E20]]` and `[[R
 
 So an unresolved reference whose target now exists is a typo, a deleted target, or a code from another research — not a race. `POST /api/researches/{id}/crossrefs/rebuild` (MCP: `crossref_rebuild`) re-scans every source — documents, task results, question answers — and reports `{sources, references, unresolved}`; `rebuilt` is kept as an alias of `references`, having previously counted documents while being documented as references. It is the last resort: a restore, or codes backfilled onto records that predate them. `GET /api/researches/{id}/crossrefs` carries a `summary` beside the list — `total`, `unresolved`, `dangling` (the first 12 distinct codes that point at nothing) and `dangling_total` — all counted after the visibility filter, so the numbers describe what this reader can see.
 
+**Deletion unresolves rather than removes.** When a research is deleted, or a section with `force`, the rows *its* sources wrote are deleted with them, but every row pointing **at** them is kept and cleared: the target columns go to `NULL` and `resolved` to false, while `target_ref` keeps the reference verbatim. So a `[[R1:E5]]` written in R2 stays in R2's document, exactly as somebody wrote it, and stops resolving.
+
+That is deliberate, and it is the rule worth carrying into a client: deleting those rows would edit a research nobody asked to change, and would make R2's own history a lie about what it once cited. Consequences:
+
+- The graph and mindmap views draw no edge for an unresolved reference, and `GET /api/researches/{id}/crossrefs` returns the row with `resolved: false` and an empty target.
+- `crossrefs/rebuild` will not repair it — there is nothing left to resolve to — and it re-scans entry content only, so an answer or a task result that pointed at the deleted research keeps its stale row until that text is rewritten.
+- `research_delete_preview` counts these before the fact as `incoming_refs`, and names up to ten of the citing researches in `incoming_from`.
+- Nothing rewrites the citing text. If the reference should go, a person or an agent edits that document deliberately.
+
 **Visualization:** Shown on entry detail pages (outgoing/incoming), in the mindmap and the knowledge graph view (dashed / crossref edges), and preserved in export.
 
 ---
@@ -854,13 +873,13 @@ A revision has no short code: it is a plain number, 1-based per entry. A [share]
 | `entity` | string | always — `research`, `section`, `entry`, `entry_view`, `session`, `question`, `task`, `roadmap`, `team`, `crossref`, `share`, `skill`, `annotation` |
 | `entity_id` | string | always — the id of the thing that changed, not of its parent |
 | `research_id` | string | always present, empty for team-scoped events |
-| `research_code` | string | when the id resolves — the same scope as a short code (`R7`), so a page routed as `/research/R7` can match an event without resolving a UUID first |
-| `parent_id` | string | the entity this one hangs off, for the entities that are not addressable on their own. `annotation.*` only today: the **entry** the mark is attached to |
-| `parent_code` | string | when the parent resolves — the same parent as a short code (`E12`), for the same reason `research_code` exists: a document page routed as `/research/R7/entry/E12` has no UUID to compare against |
+| `research_code` | string | when the id resolves — the same scope as a short code (`R7`), so a page routed as `/research/R7` can match an event without resolving a UUID first. The hub fills it in from `research_id`, except on `research.deleted`, where the row is already gone and the code travels on the event itself |
+| `parent_id` | string | the entity this one hangs off, for the entities that are not addressable on their own. `annotation.*`: the **entry** the mark is attached to. `question.deleted`: the **session** it was asked in, which is the list a page has to re-read |
+| `parent_code` | string | when the parent resolves — the same parent as a short code (`E12`, or `SS4` for a deleted question), for the same reason `research_code` exists: a document page routed as `/research/R7/entry/E12` has no UUID to compare against |
 | `actor_user_id` | string | who caused it; absent with auth off and for anything an agent did over stdio |
 | `actor_client_id` | string | which tab caused it, when the writer sent `X-Client-Id` |
 | `reason` | string | `access.*` only |
-| `name` | string | `access.revoked` only — the name of the team or research that was lost |
+| `name` | string | `access.revoked` and `research.deleted` — the name of the thing that was lost, for a recipient who can no longer look it up. `section.deleted`, `session.deleted` and `question.deleted` carry it too, so a toast can say what went |
 | `at` | int | server send time, milliseconds since the epoch. Use it instead of receipt time: a tab waking from sleep takes the whole queued backlog at once and would date every event to the moment it woke |
 
 `target_user_id` is not on the wire. Directed events exist (below), but the addressee learns nothing from being named that the delivery did not already tell them.
@@ -870,15 +889,17 @@ A revision has no short code: it is a plain number, 1-based per entry. A [share]
 | `type` | `entity` | `entity_id` | Notes |
 |--------|----------|-------------|-------|
 | `research.created`, `research.updated` | `research` | research | |
+| `research.deleted` | `research` | research | the research and everything under it is gone. Carries `research_code` and `name`, because nothing can be read back afterwards. Sent **twice over**: once plainly, which is what reaches clients on an instance with authentication off, and once directed at each member of the owning team, which is what reaches them when it is on — the ordinary rule would ask whether they may read a research that no longer exists and answer no. Exactly one copy reaches a member either way: the event flushes the cached read verdicts before it is queued, so the plain copy is re-checked against a research that is no longer there and refused. Treat the removal as idempotent regardless — a list that has already dropped the id must not error on being told again. Do not expect a `section.deleted` / `session.deleted` / `entry.deleted` storm to follow: the cascade emits nothing per row |
 | `research.transferred` | `research` | research | the research now belongs to another team |
-| `section.created`, `section.updated` | `section` | section | |
+| `section.created`, `section.updated`, `section.deleted` | `section` | section | `section.deleted` carries the section's `name`. A forced delete sends one `entry.deleted` per document it took **before** the `section.deleted`, each carrying the section as `parent_id`: a page open on one of those documents has no way to tell it was looking at a child of that section, and without its own event it kept rendering a document that is gone |
 | `entry.created`, `entry.updated`, `entry.deleted` | `entry` | entry | `entry.updated` also covers `entry_patch` and a revision restore |
 | `entry_view.updated` | `entry_view` | entry for one acknowledgement; research for a bulk acknowledgement | Personal read state changed. With authentication it is directed to that reader alone, so their other tabs re-read the queue without telling another member what they read. With authentication off it reaches ordinary local connections for the one `local` reader. Never delivered to a share connection |
 | `crossrefs.rebuilt` | `crossref` | research | `POST /api/researches/{id}/crossrefs/rebuild` finished. Every link in the research may have moved, so the graph and mindmap views re-read wholesale rather than patching. Never delivered to a share connection |
 | `crossrefs.resolved` | `crossref` | research | a reference that named a code before anything carried it now points at the thing that does — a document, task, roadmap, node or research was just created and repaired it. Same entity as the rebuild, so a page listening for "the link table moved" needs no new case. **The research named is the one holding the *source***, not the one that gained the target, and there is one event per such research: a `[[R3:E20]]` written in R1 is repaired when E20 appears in R3, and R1 is the page that changed. Nothing is sent when nothing moved. Never delivered to a share connection either, and for a reason worth stating: these fire on task and roadmap creates, so delivering them would tell a visitor whose link excludes tasks that a task had just been made. A share view repaints on `task.created` / `roadmap.created` instead, which reach a visitor only when their link includes those parts |
-| `session.created`, `session.updated` | `session` | session | |
+| `session.created`, `session.updated`, `session.deleted` | `session` | session | `session.deleted` carries the session's title as `name`. Its questions send nothing individually, and the documents written during it survive with their session link cleared — a document page showing the session should re-read the entry |
 | `question.created` | `question` | question | **one event per question**, so a batch of twelve sends twelve. It used to fire once per batch carrying the *session* id; a client written against that will now see the session id nowhere |
 | `question.updated` | `question` | question | an answer or a status change |
+| `question.deleted` | `question` | question | carries `parent_id` / `parent_code` — the **session** it was asked in, not a parent question — and the question text as `name` |
 | `task.created`, `task.updated`, `task.deleted` | `task` | task | |
 | `roadmap.created`, `roadmap.updated`, `roadmap.deleted` | `roadmap` | roadmap | adding, changing or removing nodes and edges all report as `roadmap.updated` on the roadmap |
 | `annotation.created`, `annotation.updated`, `annotation.answered`, `annotation.deleted` | `annotation` | annotation | `entity_id` is the **mark**, which tells an open document page nothing it can act on — the question that page asks is "is this one of mine", and only the entry answers it. So these are the events that carry `parent_id` / `parent_code`: the entry. `annotation.answered` is an agent finishing its work; `annotation.updated` covers everything a person does, closing and dismissing included |
@@ -893,7 +914,7 @@ A revision has no short code: it is a plain number, 1-based per entry. A [share]
 
 There is no `template.*` event of any kind: a [template](#template) belongs to a team rather than to a research, is read once at kickoff, and nothing on screen goes stale when one changes — re-read `GET /api/templates`. The skills a template attaches at `research_create` are written without a `skill.attached` event too.
 
-There is no delete event for a research, section, session or question: none of them can be deleted. Only entries, tasks, roadmaps, teams, skills and annotations can. A share is revoked rather than deleted, which is why `share.revoked` and not `share.deleted`. A skill deleted by `skill_delete` or `DELETE /api/skills/{skillId}` sends `skill.deleted` to each research that was following it — the follower list is read before the row goes, because the attachment rows cascade with it and afterwards there would be nobody left to tell. Detaching a research-private skill deletes it too, and reports as `skill.detached`.
+Everything a person can destroy now announces itself: `research.deleted`, `section.deleted`, `session.deleted`, `question.deleted`, `entry.deleted`, `task.deleted`, `roadmap.deleted`, `team.deleted`, `skill.deleted` and `annotation.deleted`. A share is revoked rather than deleted, which is why `share.revoked` and not `share.deleted`. **A cascade reports only at its top, with one exception**: deleting a research sends one `research.deleted` and not one event per section, document, session, question, task or roadmap inside it. The exception is a forced section delete, which sends an `entry.deleted` for each document it took as well — a page open on one of those documents cannot tell from `section.deleted` that it was looking at a child of that section, and a page that keeps a deleted document 404s on its next save. A client holding a list re-reads it rather than counting removals. A skill deleted by `skill_delete` or `DELETE /api/skills/{skillId}` sends `skill.deleted` to each research that was following it — the follower list is read before the row goes, because the attachment rows cascade with it and afterwards there would be nobody left to tell. Detaching a research-private skill deletes it too, and reports as `skill.detached`.
 
 ### Who receives what
 
@@ -903,8 +924,10 @@ Delivery is decided per event per connection, at send time — not once when the
 - With auth on, a research-scoped event goes to the users who may read that research — the same rule a REST read applies — and a team event to that team's members. An unidentified connection receives nothing.
 - A **directed** event (`access.revoked`, `access.changed`, and `entry_view.updated` with authentication on) is addressed to one user and skips the research-wide audience. Access events use that path because the ordinary rule already refuses somebody who just lost access; the entry-view event uses it because one member's reading is not another member's business. Directed events therefore only occur with auth on.
 - `access.revoked` carries `name` and `reason` because its recipient can no longer look either up — the moment it is sent, fetching what they lost answers 404.
+- `research.deleted` is the same problem in its sharpest form and is solved the same way: the audience is read from the owning team **before** the row is destroyed, and each member is sent a directed copy. Nothing addressed by the research could reach them afterwards, since the check is "may you read this research" and there is no research. Its `research_code` and `name` are on the event for the same reason.
 - A **share** connection is scoped by the link, not by membership: events for its one research, filtered by the same `include` flags that gate its read routes — an event about a task on a link that excludes tasks is not harmless noise, it says a task exists and when somebody touched it. Team events, directed events, `share.*` events and `entry_view.*` events never reach it. The explicit entry-view rule also protects auth-disabled installations, where the local reader's event has no target user id. `actor_user_id` and `actor_client_id` are stripped from what a share receives: they name an account and a browser tab inside the owner's organisation, and there is no tab on the other side of a link to recognise its own writes.
-- Membership verdicts are cached for at most a minute and dropped outright whenever anything touches a team, so the cache is never the reason someone keeps seeing what they lost.
+- On a **research that is deleted**, that same share connection does receive the plain `research.deleted`: the share rule asks only whether the event names its research, and there is no membership lookup to fail. It then finds every route under `/api/shared/{token}/…` answering 404. The share rows go with the research, so the token stops resolving and the socket itself closes with **4401** on the next keepalive. That is the intended end of a link whose subject is gone.
+- Membership verdicts are cached for at most a minute and dropped outright whenever anything touches a team — and on `research.deleted`, where a stale "may read" would deliver the plain copy of an event that is also directed at every member, and announce the same deletion twice. The cache is never the reason someone keeps seeing what they lost.
 - The broadcast queue is bounded. Under a burst the server drops events rather than stalling the write that produced them, so a client must be able to recover by re-reading, not by replaying.
 
 ### Recognising your own writes
