@@ -194,6 +194,53 @@ func TestResearchDelete_CountersAreReclaimed(t *testing.T) {
 	}
 }
 
+// TestResearchDelete_GlobalResearchCounterNeverRewinds pins the invariant the
+// rest of the product rests on: an R code is never handed out twice.
+//
+// A reference into a deleted research survives as unresolved text keeping its
+// `target_ref` — `[[R7]]` stays written as `[[R7]]`. If R7 could ever be
+// allocated again, the crossref rebuild would silently re-point somebody's
+// citation at a research they have never seen, in a team they may not be in.
+// That is why the delete matches counter rows by `%:<uuid>` rather than by
+// prefix: the global key is `researches:R:`, whose scope is empty, so it cannot
+// match — and `reserveCode` only ever moves a value up. Per-research counters
+// (entries, sections, sessions, tasks, roadmaps) going away with their research
+// is fine; their scope goes with them.
+func TestResearchDelete_GlobalResearchCounterNeverRewinds(t *testing.T) {
+	env := newDeleteEnv(t)
+	ctx := context.Background()
+	research, _ := env.populate(t, ctx, "First")
+	deletedCode := research.Code
+
+	var counterBefore int
+	if err := env.db.NewSelect().Column("value").Table("storage_counters").
+		Where("scope_key=?", "researches:R:").Scan(ctx, &counterBefore); err != nil {
+		t.Fatalf("read the global research counter: %v", err)
+	}
+
+	if err := env.research.Delete(ctx, research.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var counterAfter int
+	if err := env.db.NewSelect().Column("value").Table("storage_counters").
+		Where("scope_key=?", "researches:R:").Scan(ctx, &counterAfter); err != nil {
+		t.Fatalf("the global research counter row did not survive the delete: %v", err)
+	}
+	if counterAfter != counterBefore {
+		t.Errorf("global research counter moved %d -> %d; an R code must never be reallocated", counterBefore, counterAfter)
+	}
+
+	next, _, err := env.research.Create(ctx, CreateResearchRequest{Name: "Second", Description: "d", Goal: "g"})
+	if err != nil {
+		t.Fatalf("create after delete: %v", err)
+	}
+	if next.Code == deletedCode {
+		t.Errorf("the research created after the delete reused %s — every [[%s]] written anywhere now points at it",
+			deletedCode, deletedCode)
+	}
+}
+
 // TestResearchDelete_IncomingReferencesBecomeUnresolved is the rule the issue
 // singles out. If R2 says "this rests on [[R1:E5]]" and R1 goes, deleting that
 // row would edit R2 — it would make R2's own history a lie about what it once
