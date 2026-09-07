@@ -341,9 +341,6 @@ func TestRoles_ViewerCannotWriteAnything(t *testing.T) {
 	}
 }
 
-// A section instruction is read by everyone in the team and written only by
-// somebody who may write content. It is a convention for the documents, not a
-// setting about the team, so it does not need an owner.
 // TestRoles_AnonymousIsNotARoleWhenAccountsAreOn adds the row the matrix never
 // had: a caller with no identity at all.
 //
@@ -409,6 +406,9 @@ func TestRoles_AnonymousIsNotARoleWhenAccountsAreOn(t *testing.T) {
 	}
 }
 
+// A section instruction is read by everyone in the team and written only by
+// somebody who may write content. It is a convention for the documents, not a
+// setting about the team, so it does not need an owner.
 func TestRoles_SectionInstructionIsReadByEveryoneAndWrittenByWriters(t *testing.T) {
 	const instruction = "Name the producing service. State the consumer."
 	for _, tc := range []struct {

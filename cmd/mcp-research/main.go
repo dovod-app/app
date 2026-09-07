@@ -244,7 +244,7 @@ func main() {
 		// transport would break the one thing that is fine.
 		if cfg.AuthEnabled && defaultUser == nil {
 			log.Warn("stdio transport cannot authenticate anyone and no default user is set — this session will reach no research",
-				"symptom", "research_list answers an empty list, every tool naming a research answers \"not found\", and research_create refuses with \"authentication required\"",
+				"symptom", "research_list answers an empty list, every tool naming a research answers \"not found\", and research_create refuses with \"this session is not signed in\"",
 				"fix", "set --default-user (or MCP_RESEARCH_DEFAULT_USER / default_user) to the email the stdio session should act as",
 				"unaffected", "the web UI and REST API on the web port")
 		}

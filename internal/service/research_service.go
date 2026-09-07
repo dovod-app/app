@@ -133,7 +133,15 @@ func (s *ResearchService) resolveCreateTeam(ctx context.Context, requested strin
 			// An instance with accounts has no anonymous author. Letting the
 			// research through would file it in the local team, where the
 			// person who asked for it could not read it back.
-			return "", ErrNoAuth
+			//
+			// Its own sentence rather than bare ErrNoAuth, whose text is "sign
+			// in to manage teams": the only caller who can reach this is a
+			// stdio session that asked to create a project and mentioned no
+			// team, and a refusal naming an entity it never mentioned sends the
+			// reader looking in the wrong place.
+			return "", noAuthf("this session is not signed in, so there is no account to file the project under. " +
+				"The server was started with accounts enabled: a stdio session needs --default-user " +
+				"(or MCP_RESEARCH_DEFAULT_USER) naming the account it should act as")
 		}
 		// Local mode: no users, one team, everything in it.
 		return domain.LocalTeamID, nil
