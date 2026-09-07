@@ -22,6 +22,13 @@ import {
  * `domain.FieldSchema()` rather than invented, because the component takes them
  * as props for exactly that reason: a cap the client believes and the server
  * enforces would disagree once, at the worst moment.
+ *
+ * Under each section's field rows sits the writing instruction — `How to write
+ * here` — drawn by `Research/Settings/InstructionEditor`, which has its own
+ * stories for its own states. It is **under** the rows on purpose: the
+ * instruction is supposed to name the keys the section declares, and keeping
+ * those keys on screen directly above the textarea is the whole anti-drift
+ * argument for the placement.
  */
 const meta: Meta<typeof FieldSpecList> = {
   title: 'Research/Settings/FieldSpecList',
@@ -34,7 +41,23 @@ const meta: Meta<typeof FieldSpecList> = {
 export default meta
 type Story = StoryObj<typeof FieldSpecList>
 
-const base = { editable: true, caps: fieldCaps, types: fieldTypes, reservedKeys }
+/**
+ * `onSaveInstruction` is in the baseline rather than in one story, because the
+ * settings page — the only caller there is — always passes it. Leaving it out
+ * would make every story here a card the product never renders: no "How to
+ * write here" row under the field rows, on a surface whose own lead paragraph
+ * now opens by promising one.
+ *
+ * `Mixed` is the pair worth reading: one section with an instruction and one
+ * without, since the row is present either way and only its text changes.
+ */
+const base = {
+  editable: true,
+  caps: fieldCaps,
+  types: fieldTypes,
+  reservedKeys,
+  onSaveInstruction: async () => {},
+}
 
 /** One section that declares fields, one that does not — the ordinary research. */
 export const Mixed: Story = {
@@ -159,9 +182,30 @@ export const EditorSaveFails: Story = {
   },
 }
 
-/** A viewer reads the declaration and cannot change it. */
+/** A viewer reads the declaration and cannot change it — including the
+ *  instruction row, whose Edit button is removed rather than disabled. */
 export const ReadOnly: Story = {
   args: { ...base, sections: [mockSpecSection, mockTopicSection], editable: false },
+}
+
+/**
+ * Without `onSaveInstruction` — the card as it looked before this feature.
+ *
+ * The prop is optional and the row is behind a `v-if` on it, so a caller that
+ * passes no handler gets no instruction row at all rather than a row whose Save
+ * does nothing. Kept as one story rather than as the default, because it is a
+ * shape no page in the product renders; its job is to show what the `v-if`
+ * decides, and to be the thing to compare against if the row ever goes missing
+ * for a reason nobody meant.
+ */
+export const WithoutInstructionRow: Story = {
+  args: {
+    editable: true,
+    caps: fieldCaps,
+    types: fieldTypes,
+    reservedKeys,
+    sections: [mockSpecSection, mockTopicSection],
+  },
 }
 
 /**

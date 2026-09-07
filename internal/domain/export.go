@@ -45,6 +45,11 @@ type ExportSection struct {
 	Description string        `json:"description,omitempty"`
 	Status      SectionStatus `json:"status"`
 	Position    int           `json:"position"`
+	// Instruction travels for the same reason FieldSpec below does: a research
+	// that comes back from a dump without its writing conventions has its next
+	// eighteen documents written from scratch again. It is never in a share's
+	// export — the sections are redacted before the dump is built.
+	Instruction string `json:"instruction,omitempty"`
 	// FieldSpec travels so an imported research keeps the declaration its
 	// documents were written against, rather than arriving as a pile of values
 	// nothing explains.

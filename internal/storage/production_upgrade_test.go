@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -58,6 +60,12 @@ func TestProductionUpgrade_SQLiteFilePreservesExistingData(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := snapshotUpgradeTables(t, old, tables)
+	oldSectionColumns, sectionsBefore := sectionConstraints(t, old, nil)
+	// The comparison below is only worth making if the snapshot actually holds
+	// the constraint it exists to protect. Two empty strings compare equal.
+	if !strings.Contains(sectionsBefore, "CASCADE") || !strings.Contains(sectionsBefore, "research_id") {
+		t.Fatalf("the sections snapshot does not carry the cascade it is meant to guard:\n%s", sectionsBefore)
+	}
 	schema := upgradeSchema(t, old)
 	path := filepath.Join(t.TempDir(), "research.db")
 	// VACUUM INTO is a consistent standalone SQLite backup, including all data.
@@ -81,6 +89,11 @@ func TestProductionUpgrade_SQLiteFilePreservesExistingData(t *testing.T) {
 		if got := upgradeSchema(t, db); !reflect.DeepEqual(got, schema) {
 			t.Fatal("upgrade changed pre-existing tables/indexes")
 		}
+		// `sections` is out of the comparison above because 030 appends a
+		// column to it; its constraints are still held, by pragma.
+		if _, got := sectionConstraints(t, db, oldSectionColumns); got != sectionsBefore {
+			t.Fatalf("upgrade changed sections' constraints or an existing column:\n%s\n\nwas:\n%s", got, sectionsBefore)
+		}
 		var integrity string
 		if err := db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
 			t.Fatalf("integrity: %s %v", integrity, err)
@@ -96,8 +109,14 @@ func TestProductionUpgrade_SQLiteFilePreservesExistingData(t *testing.T) {
 			t.Fatalf("foreign-key violations after upgrade: %v", scanErr)
 		}
 		var migrations int
-		if err := db.NewSelect().Table("schema_migrations").ColumnExpr("COUNT(*)").Scan(ctx, &migrations); err != nil || migrations != 29 {
+		if err := db.NewSelect().Table("schema_migrations").ColumnExpr("COUNT(*)").Scan(ctx, &migrations); err != nil || migrations != 30 {
 			t.Fatalf("migration ledger: %d %v", migrations, err)
+		}
+		// A section that predates 030 has no writing instruction, and the
+		// migration may not invent one: the default is the honest statement.
+		var instruction string
+		if err := db.QueryRow("SELECT instruction FROM sections WHERE id=?", "s1").Scan(&instruction); err != nil || instruction != "" {
+			t.Fatalf("upgrade gave a pre-existing section an instruction: %q %v", instruction, err)
 		}
 		entry, err := NewEntryRepository(db).FindByID(ctx, "e1")
 		memory, memoryErr := NewMemoryRepository(db).List(ctx, "r1")
@@ -135,6 +154,87 @@ func TestProductionUpgrade_SQLiteFilePreservesExistingData(t *testing.T) {
 	}
 }
 
+// sectionConstraints is what upgradeSchema cannot assert about `sections`.
+//
+// 030 appends a column, so the stored CREATE TABLE text differs across the
+// upgrade and the table is excluded from the DDL comparison. Excluding it
+// wholesale would give up the constraints that text carries — the cascade to
+// researches, UNIQUE(research_id, name), and every old column's type, NOT NULL
+// and default — and the migration that would then pass unnoticed is the SQLite
+// twelve-step rebuild: rename, CREATE TABLE sections_new, copy, drop, rename
+// back, with ON DELETE CASCADE quietly missing from the new statement. Nothing
+// else in this test sees that: the rows still match, foreign_key_check still
+// passes because nothing is orphaned yet, and the index list is unchanged.
+//
+// Pragmas are compared instead, so an appended column costs nothing here and
+// the next additive migration needs no edit. Columns are filtered to those the
+// old database had, which is the only difference the upgrade is allowed to make.
+func sectionConstraints(t *testing.T, db *bun.DB, only map[string]bool) (map[string]bool, string) {
+	t.Helper()
+	ctx := context.Background()
+	var out strings.Builder
+	columns := map[string]bool{}
+
+	rows, err := db.QueryContext(ctx, "PRAGMA table_info(sections)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info []string
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		columns[name] = true
+		if only != nil && !only[name] {
+			continue
+		}
+		info = append(info, fmt.Sprintf("%s %s notnull=%d default=%q pk=%d", name, ctype, notnull, dflt.String, pk))
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(info)
+	out.WriteString(strings.Join(info, "\n"))
+
+	for _, pragma := range []string{"PRAGMA foreign_key_list(sections)", "PRAGMA index_list(sections)"} {
+		rows, err := db.QueryContext(ctx, pragma)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		var lines []string
+		for rows.Next() {
+			values := make([]any, len(cols))
+			ptrs := make([]any, len(cols))
+			for i := range values {
+				ptrs[i] = &values[i]
+			}
+			if err := rows.Scan(ptrs...); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			lines = append(lines, fmt.Sprintf("%v", values))
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		sort.Strings(lines)
+		out.WriteString("\n" + pragma + "\n" + strings.Join(lines, "\n"))
+	}
+	return columns, out.String()
+}
+
 func snapshotUpgradeTables(t *testing.T, db *bun.DB, tables []string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
@@ -144,6 +244,12 @@ func snapshotUpgradeTables(t *testing.T, db *bun.DB, tables []string) map[string
 		// records. Compare every remaining research field across the upgrade.
 		if table == "researches" {
 			projection = researchColumns
+		}
+		// 030 adds sections.instruction, which the old database has no column
+		// for. Every column that existed before it is still compared, and the
+		// new one is checked for its default separately below.
+		if table == "sections" {
+			projection = "id, code, research_id, name, display_name, description, status, position, field_spec, spec_version, created_at, updated_at"
 		}
 		rows, err := db.Query("SELECT "+projection+" FROM ? ORDER BY rowid", bun.Ident(table))
 		if err != nil {
@@ -184,7 +290,7 @@ func snapshotUpgradeTables(t *testing.T, db *bun.DB, tables []string) map[string
 func upgradeSchema(t *testing.T, db *bun.DB) []string {
 	t.Helper()
 	var schema []string
-	if err := db.NewSelect().Table("sqlite_master").ColumnExpr("COALESCE(sql, '')").Where("tbl_name NOT IN ('storage_counters', 'research_memory') AND NOT (type='table' AND name='researches')").Order("type", "name").Scan(context.Background(), &schema); err != nil {
+	if err := db.NewSelect().Table("sqlite_master").ColumnExpr("COALESCE(sql, '')").Where("tbl_name NOT IN ('storage_counters', 'research_memory') AND NOT (type='table' AND name IN ('researches', 'sections'))").Order("type", "name").Scan(context.Background(), &schema); err != nil {
 		t.Fatal(err)
 	}
 	return schema

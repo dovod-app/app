@@ -61,6 +61,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		errors.Is(err, service.ErrTextReplaceNotFound),
 		errors.Is(err, service.ErrTextReplaceOnBlocks),
 		errors.Is(err, service.ErrInvalidFieldSpec),
+		errors.Is(err, service.ErrSectionInstructionLong),
 		// Import is the one write in this product that refuses rather than
 		// reports, because a person is standing over the file with an undo.
 		// See the comment at the top of import_markdown.go.

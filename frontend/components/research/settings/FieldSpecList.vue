@@ -6,8 +6,8 @@
           <ShortCode v-if="section.code" :code="section.code" />
           <h3 class="card-title">{{ section.display_name || section.name }}</h3>
         </div>
-        <span class="spec-count" :class="{ 'is-full': countFor(section) >= caps.fields }">
-          {{ countFor(section) }}/{{ caps.fields }}
+        <span class="cap-count" :class="{ 'is-over': countFor(section) >= caps.fields }">
+          {{ countFor(section) }} / {{ caps.fields }}
         </span>
       </div>
 
@@ -99,6 +99,25 @@
           </button>
         </div>
       </template>
+
+      <!--
+        Under the field list, not above it. The instruction is supposed to name
+        the keys this section declares, and putting it last is what keeps those
+        keys on screen directly above the textarea somebody types the
+        instruction into. That adjacency is the whole anti-drift argument.
+
+        The child owns its own draft and error, so an open field-spec editor and
+        an open instruction editor on the same card coexist without either
+        knowing about the other.
+      -->
+      <ResearchSettingsInstructionEditor
+        v-if="onSaveInstruction && (section.instruction || editable)"
+        :instruction="section.instruction || ''"
+        :field-keys="keysOf(section)"
+        :editable="editable"
+        :cap="caps.instruction_max ?? 500"
+        :on-save="(instruction: string) => onSaveInstruction!(section.id, instruction)"
+      />
     </div>
   </div>
 </template>
@@ -119,7 +138,7 @@ interface DraftField {
 const props = defineProps<{
   sections: any[]
   editable?: boolean
-  caps: { fields: number; required: number; options: number }
+  caps: { fields: number; required: number; options: number; instruction_max?: number }
   types: { type: string }[]
   reservedKeys: string[]
   /**
@@ -130,6 +149,12 @@ const props = defineProps<{
    * below unreachable — while the comment beside the call claims the opposite.
    */
   onSave?: (sectionId: string, spec: any[]) => Promise<void>
+  /**
+   * Persists a section's writing instruction. Optional: without it the row is
+   * not rendered at all, which is what keeps this component usable in a story
+   * that is only about field specs.
+   */
+  onSaveInstruction?: (sectionId: string, instruction: string) => Promise<void>
 }>()
 
 const drafts = reactive<Record<string, DraftField[] | undefined>>({})
@@ -138,6 +163,10 @@ const busy = ref<string | null>(null)
 
 function countFor(section: any): number {
   return section.field_spec?.length ?? 0
+}
+
+function keysOf(section: any): string[] {
+  return (section.field_spec ?? []).map((f: any) => f.key).filter(Boolean)
 }
 
 function openEditor(section: any) {
@@ -207,13 +236,6 @@ async function save(section: any) {
   gap: var(--space-3); margin-bottom: var(--space-2);
 }
 .spec-heading { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-
-.spec-count {
-  font-size: var(--type-xs);
-  color: var(--color-text-faint);
-  font-variant-numeric: tabular-nums;
-}
-.spec-count.is-full { color: var(--color-warning); }
 
 .spec-blurb {
   margin: 0 0 var(--space-3);

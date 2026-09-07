@@ -138,7 +138,8 @@ func (h *WriteHandler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 
 	section, err := h.section.Update(r.Context(), sectionID, service.UpdateSectionRequest{
 		DisplayName: input.DisplayName, Description: input.Description,
-		Status: status, Position: input.Position, FieldSpec: input.FieldSpec,
+		Status: status, Position: input.Position, Instruction: input.Instruction,
+		FieldSpec: input.FieldSpec,
 	})
 	if err != nil {
 		writeServiceError(w, err)

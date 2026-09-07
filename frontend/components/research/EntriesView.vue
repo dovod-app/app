@@ -48,6 +48,20 @@
         {{ sectionInfo.description }}
       </p>
 
+      <!-- The section's own writing convention, above the documents written
+           under it. Absent on a share — the payload is redacted there too, and
+           this is the second defence rather than the first — and absent, with
+           no placeholder row, on the sections that carry none, which is most
+           of them. -->
+      <ResearchSectionInstruction
+        v-if="sectionInfo.instruction && !shareActive() && query.length <= 1"
+        :text="sectionInfo.instruction"
+        :research-slug="researchSlug"
+        :section-id="sectionInfo.id"
+        :section-code="sectionInfo.code"
+        :editable="canWrite"
+      />
+
       <p v-if="importer.refusal.value" class="inline-error import-refusal">
         <span>{{ importer.refusal.value.message }}</span>
         <button
