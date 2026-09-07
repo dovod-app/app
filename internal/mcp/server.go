@@ -96,16 +96,33 @@ func (s *Server) RunStdio(ctx context.Context, defaultUser *domain.User) error {
 	return s.server.Run(ctx, &sdkmcp.StdioTransport{})
 }
 
-func (s *Server) RunSSE(ctx context.Context, port int, authSvc *service.AuthService, baseURL string) error {
+// RunSSE serves the legacy SSE transport on its own listener.
+//
+// apiToken is the instance-wide write token. It matters here because this
+// listener carries the same 52 tools the HTTP API's writes go through, and it
+// used to be gated only when accounts were on: an instance configured with
+// `api_token` and no accounts refused an anonymous `POST /api/entries` and then
+// handed the same caller a working MCP session on this port. The three cases
+// below are the three the REST side has, and they have to stay the same three —
+// a credential that closes one door and not the other is not a credential.
+func (s *Server) RunSSE(ctx context.Context, port int, authSvc *service.AuthService, apiToken, baseURL string) error {
 	sseHandler := sdkmcp.NewSSEHandler(func(r *http.Request) *sdkmcp.Server {
 		return s.server
 	}, nil)
 
 	var handler http.Handler = sseHandler
-
-	// Wrap with auth middleware when auth service is available
-	if authSvc != nil {
+	switch {
+	case authSvc != nil:
+		// Accounts: a JWT or an API key, and the WWW-Authenticate header that
+		// starts OAuth discovery.
 		handler = sseAuthMiddleware(authSvc, baseURL, sseHandler)
+	case apiToken != "":
+		handler = sseTokenMiddleware(apiToken, sseHandler)
+	default:
+		// No credential configured at all: local callers only, the same rule
+		// the REST writes take. See auth.LocalRequest for why the address is
+		// not enough on its own.
+		handler = sseLocalOnlyMiddleware(sseHandler)
 	}
 
 	addr := fmt.Sprintf(":%d", port)
@@ -130,6 +147,44 @@ func (s *Server) StreamableHTTPHandler() http.Handler {
 	return sdkmcp.NewStreamableHTTPHandler(func(r *http.Request) *sdkmcp.Server {
 		return s.server
 	}, nil)
+}
+
+// sseTokenMiddleware guards the SSE transport with the instance write token,
+// for a server that has one and no accounts.
+//
+// Header only — deliberately not the `?token=` form sseAuthMiddleware also
+// accepts. That form exists because EventSource cannot set headers, and it is
+// the right trade for a per-user JWT or API key: those are scoped to one
+// account and can be revoked one at a time. The instance api_token is neither.
+// It is the longest-lived, highest-privilege secret this server has, it does not
+// rotate, and in a query string it is written verbatim into every proxy access
+// log — deploy/nginx/ uses the default `combined` format, which logs $request —
+// as well as browser history and Referer.
+//
+// Nothing is broken by being strict from the start: until this middleware
+// existed the SSE transport took no credential at all in this posture, so there
+// is no client anywhere that is passing this token in a URL today.
+func sseTokenMiddleware(apiToken string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := r.Header.Get("Authorization")
+		if len(h) <= 7 || h[:7] != "Bearer " || h[7:] != apiToken {
+			http.Error(w, `{"error":"invalid or missing bearer token"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sseLocalOnlyMiddleware is the no-credential case: the transport answers the
+// machine it runs on and nobody else.
+func sseLocalOnlyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !auth.LocalRequest(r) {
+			http.Error(w, `{"error":"the write API is disabled: set api_token or auth_enabled to accept writes from another machine"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // sseAuthMiddleware extracts bearer token from SSE requests and injects user into context.

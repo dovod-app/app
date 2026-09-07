@@ -18,7 +18,7 @@
       <template v-if="!editing">
         <PageHeader :code="entry.code" :title="entry.title">
           <template #actions>
-            <TeamViewerNotice v-if="isViewer" :team-name="research?.team_name" />
+            <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="research?.team_name" />
 
             <!-- Status: a picker for a writer, the badge alone for a reader -->
             <StatusBadge v-if="!canWrite" :status="entry.status" />
@@ -447,7 +447,7 @@ const research = computed(() => researchData.value?.data?.research)
 // Every research-scoped page publishes the caller's role from the payload it
 // already fetches, so the controls beneath it — down to a checkbox inside
 // rendered content — know whether they may write.
-const { canWrite, canAdmin, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, canAdmin, readOnlyReason, setFromResearch } = useResearchRole()
 watch(researchData, (d) => setFromResearch(d?.data?.research), { immediate: true })
 
 const researchName = computed(() => research.value?.name ?? 'Project')

@@ -119,6 +119,7 @@ Who may do what. A team owns researches; membership in that team is the whole of
 - **Not a member of the owning team** → the research does not exist for you: `not found` from a tool, `404` from REST. Confirming that someone else's research exists is itself a leak, so this is deliberate.
 - **A member without the right** — a `viewer` writing — → `your role in this team does not allow this`, `403` from REST. Hiding a research from someone who can already read it would protect nothing.
 - With `auth_enabled: false` there is no caller and no check: everything lives in one local team and every operation is permitted, exactly as before teams existed.
+- Roles are the second gate, not the first. Before any of them, the request has to be taken at all: with accounts on, every route but the public handful needs `Authorization: Bearer <JWT | API key | OAuth access token>`; with accounts off but an `api_token` configured, every **write** and every MCP call on either socket transport — Streamable HTTP at `/mcp` and the legacy SSE listener — needs `Authorization: Bearer <api_token>`, which SSE also accepts as `?token=`; with neither configured, those same requests are accepted only from the machine the server runs on — a loopback peer address carrying no `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header — and answer `401 the write API is disabled: set api_token or auth_enabled to accept writes from another machine` to anyone else. REST **reads** ask for nothing in both credential-less postures. Full table: [MCP Client Guide → Connecting Over HTTP](/llms/mcp-client-guide.md#connecting-over-http-which-credential-this-instance-wants).
 - The WebSocket at `/ws` needs the same credential as everything else when auth is on, and delivery is decided **per event, per connection**: a research event reaches only those who may read it, a team event only its members, and losing access stops the updates on a socket already open. See [Real-time Events](#real-time-events) below.
 - That local team survives if auth is later turned on. It has no members, so its researches are **readable by every signed-in user and writable by none** until the first registration claims them — a deliberate compromise between stranding them behind a team nobody can join and letting the first caller take them for themselves.
 
@@ -155,7 +156,7 @@ Who may do what. A team owns researches; membership in that team is the whole of
 | `POST` | `/api/invites/{token}/accept` | a signed-in user |
 | `POST` | `/api/researches/{id}/transfer` | owner of the source team, write access in the target |
 
-Every `/api/teams` and `/api/invites` route except the public preview needs a session: with `auth_enabled: false` they answer `401 sign in to manage teams`, because there are no users to put in a team. The transfer route is the exception — with no caller there is nothing to check, and it moves the research.
+Every `/api/teams` and `/api/invites` route except the public preview needs a session: with `auth_enabled: false` they answer `401 sign in to manage teams`, because there are no users to put in a team. The transfer route is the exception — with no caller there is nothing to check, and it moves the research, for a caller the server takes a write from at all (with no `api_token` either, one on its own machine).
 
 `GET /api/researches` lists every research across all your teams and takes `?team={id}` to narrow it to one, and each item carries `team_id`, `team_name`, `team_is_personal` and `role`.
 
@@ -238,7 +239,7 @@ That list is the whole surface. Anything else under the prefix — another metho
 
 **Revocation** takes effect on the next request; every layer consults the share per request. The exception is an open WebSocket, which re-resolves the link on its own timer and closes within the minute — see [Real-time Events](#real-time-events).
 
-**No MCP tool creates, lists or revokes a share.** Handing out a public link is a human act; the tool list is unchanged. A share token is a REST credential only — it never reaches an MCP endpoint. Shares also work with `auth_enabled: false`, where the row simply records no creator.
+**No MCP tool creates, lists or revokes a share.** Handing out a public link is a human act; the tool list is unchanged. A share token is a REST credential only — it never reaches an MCP endpoint. Shares also work with `auth_enabled: false`, where the row simply records no creator — but issuing one is a write, so on an instance with no `api_token` either it can only be done from the machine the server runs on. Visiting a link is not: the routes under `/api/shared/{token}/…` take the token as their whole credential and are reachable from anywhere, whatever posture the instance is in.
 
 ---
 

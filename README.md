@@ -152,6 +152,13 @@ Open **[localhost:8088](http://localhost:8088)**, create your account, and
 your projects across container restarts. This example exposes the web port on
 your own machine; see [deployment](#deployment) for a shared server.
 
+Keep `MCP_RESEARCH_AUTH_ENABLED=true`. A container is another machine as far as
+Dovod is concerned: requests from your browser reach it over the Docker network,
+not from its own loopback address, so without accounts or an `api_token` the
+server accepts no writes and the interface is read-only. See
+[who can write to your server](#who-can-write-to-your-server) for the other
+ways to configure it.
+
 The binary, environment variables, and API identifiers retain `mcp-research` /
 `research` names for compatibility. The product and UI use **Dovod**,
 **Projects**, and **Documents**.
@@ -195,12 +202,18 @@ can sign in with your Dovod account. If your client supports bearer headers,
 create an API key in **Settings → API Keys** and send it as
 `Authorization: Bearer <your-api-key>`.
 
+The MCP endpoint takes the same credential as the write API. On a server with
+only an `api_token` set, send that token as the bearer. On a server with
+neither credential, MCP answers only clients on the machine it runs on — which
+is the local case above, and never a deployed one.
+
 The client must be able to reach that address. A hosted AI client needs a
 reachable HTTPS deployment of Dovod.
 
 Streamable HTTP uses the web port. Legacy SSE is also available at
 `:8081/sse` when running with `--transport sse`; expose that port only if your
-client uses it.
+client uses it. It expects the same credential, as a bearer header or a
+`?token=` parameter for clients that cannot set headers.
 
 ### Let a local client start the binary
 
@@ -249,14 +262,34 @@ for a server configuration.
 | Registration | `--allow-registration` | `MCP_RESEARCH_ALLOW_REGISTRATION` | `true` |
 | Public URL | `--base-url` | `MCP_RESEARCH_BASE_URL` | — |
 | Local default user | `--default-user` | `MCP_RESEARCH_DEFAULT_USER` | — |
-| Operator API token | `--api-token` | `MCP_RESEARCH_API_TOKEN` | — |
+| Operator API token | `--api-token` | `MCP_RESEARCH_API_TOKEN` | None — writes only from the server's own machine |
 | Revision retention limit | `--revision-limit` | `MCP_RESEARCH_REVISION_LIMIT` | `0` — keep all |
 | Log level | `--log-level` | `MCP_RESEARCH_LOG_LEVEL` | `info` |
 | Config file | `--config` | `MCP_RESEARCH_CONFIG` | `./config.yaml` |
 
 Set a persistent `jwt_secret` to keep login sessions valid across server
 restarts. The `--default-user` convenience above is for local use; omit it on
-shared deployments.
+shared deployments — the automatic browser sign-in is offered only to a browser
+on the server's own machine.
+
+### Who can write to your server
+
+Without `auth_enabled`, anyone who can reach the address can read every project.
+Who can *write* — through the web interface, the REST API, or any MCP tool —
+depends on which credential you configured:
+
+| Configured | Who can write |
+| --- | --- |
+| `auth_enabled` | Signed-in accounts, their API keys, and OAuth clients, subject to team role |
+| `api_token` only | Any caller sending `Authorization: Bearer <token>`. A browser cannot hold one, so edits made in the web interface are refused |
+| Neither | Only callers on the machine Dovod runs on. Anything else is refused with `401` |
+
+The third row is the single-binary local mode, and it is exact: the request has
+to come from the server's own loopback address and carry no proxy forwarding
+header. A published container port, a reverse proxy, and another computer on
+your network are all outside it. Dovod logs a warning at startup when it is
+running that way, and `GET /api/health` reports `write_api` for the caller
+asking, so you can check from wherever you are.
 
 ### PostgreSQL and MySQL
 
@@ -278,6 +311,11 @@ data. See [database setup and testing](docs/databases.md).
 
 ## Deployment
 
+**A server another machine can reach needs `auth_enabled` or an `api_token`.**
+With neither, Dovod refuses every write that arrives over the network — and
+behind a reverse proxy that is all of them — while leaving every project
+readable to anyone who has the address.
+
 For a shared instance, enable authentication, set a persistent JWT secret,
 and set `base_url` to the public HTTPS address. Configure registration to suit
 your team. The repository includes a Compose setup:
@@ -288,10 +326,11 @@ cp config.yaml.example config.yaml
 docker compose up -d
 ```
 
-Compose builds from source and stores SQLite data in the `mcp-data` volume.
-The [nginx configuration](deploy/nginx/mcp-research.conf) shows how to proxy
-the UI, MCP, OAuth, and WebSocket connections. Back up your database and keep
-the server configuration with it.
+Compose builds from source and stores SQLite data in the `mcp-data` volume;
+`config.yaml.example` enables authentication, so keep that setting when you edit
+your copy. The [nginx configuration](deploy/nginx/mcp-research.conf) shows how
+to proxy the UI, MCP, OAuth, and WebSocket connections. Back up your database
+and keep the server configuration with it.
 
 Each account gets a personal team. Additional teams use these roles:
 

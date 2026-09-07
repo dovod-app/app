@@ -23,15 +23,37 @@ export function useAuth() {
   async function fetchAuthInfo() {
     try {
       const res = await $fetch<AuthInfo>(`${baseURL}/api/auth/info`)
-      authEnabled.value = true
-      allowRegistration.value = res.allow_registration
 
-      // Auto-login when default_user is configured (local dev)
-      if (res.auto_login_token && !localStorage.getItem('auth_token')) {
+      // Read the answer, not the fact that something answered.
+      //
+      // This route used to exist only when auth was on. With auth off the
+      // request fell through to the SPA catch-all, which returned index.html
+      // with a 200 — so `$fetch` did not throw, this set authEnabled to true,
+      // and the route guard sent every page to a login screen that could not be
+      // used because /api/auth/login did not exist either. The whole web UI was
+      // unreachable in the mode the product documents as its default.
+      //
+      // The route now always answers and says which mode it is in. Checking the
+      // shape as well as the value keeps this honest if it ever stops.
+      authEnabled.value = typeof res === 'object' && res !== null && res.auth_enabled === true
+      // Only a server that answered "accounts are on, registration is closed"
+      // closes the door. A failure below must not: `false` there would be a
+      // guess, and register.vue redirects away on it while login.vue hides the
+      // link back — so one flaky request would strand somebody on a sign-in
+      // page with no way to make an account, for the life of the tab.
+      allowRegistration.value = authEnabled.value ? res.allow_registration === true : false
+
+      // Auto-login when default_user is configured (local dev). The server
+      // sends this only to a caller on its own machine.
+      if (authEnabled.value && res.auto_login_token && !localStorage.getItem('auth_token')) {
         token.value = res.auto_login_token
         localStorage.setItem('auth_token', res.auto_login_token)
       }
     } catch {
+      // The route did not answer at all. Treat it as "no accounts" — that is
+      // what a server without them looks like from here — but leave
+      // allowRegistration at its default, because this branch knows nothing
+      // about registration and the cost of guessing wrong is a locked door.
       authEnabled.value = false
     }
   }

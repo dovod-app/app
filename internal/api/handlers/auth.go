@@ -196,7 +196,17 @@ func (h *AuthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 		"auth_enabled":       true,
 		"allow_registration": h.authSvc.AllowRegistration(),
 	}
-	if h.autoLoginToken != "" {
+	// The auto-login token is a 30-day JWT for the `default_user`, and this is a
+	// public route. Handing it to anyone who asks made an instance configured
+	// for local convenience give a stranger that account — reads, writes, and
+	// `/api/auth/api-keys` to mint a credential outliving the JWT — for a month,
+	// revocable only by rotating `jwt_secret`.
+	//
+	// It exists so a browser on the operator's own machine logs in without a
+	// password, so that is the only caller it is served to. The predicate is the
+	// one the write gate uses; a second reading of "is this local" is how the
+	// two drift apart.
+	if h.autoLoginToken != "" && auth.LocalRequest(r) {
 		resp["auto_login_token"] = h.autoLoginToken
 	}
 	writeJSON(w, http.StatusOK, resp)

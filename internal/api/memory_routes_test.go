@@ -18,6 +18,11 @@ func TestMemoryRoutes_CRUDConflictAndLegacyRejection(t *testing.T) {
 		data, _ := json.Marshal(body)
 		req := httptest.NewRequest(method, path, bytes.NewReader(data))
 		req.Header.Set("Content-Type", "application/json")
+		// No api_token and no accounts: writes are taken from a client on the
+		// server's own machine only. httptest defaults RemoteAddr to 192.0.2.1
+		// and Host to example.com, and auth.LocalRequest reads both.
+		req.RemoteAddr = "127.0.0.1:54321"
+		req.Host = "localhost:8088"
 		w := httptest.NewRecorder()
 		s.mux.ServeHTTP(w, req)
 		if w.Code != status {

@@ -23,8 +23,11 @@ route. The instance `api_token` is a separate credential and is not one of them:
 it identifies whoever runs the server, belongs to no team, and only the
 server-wide template routes accept it in place of a person. Fetch the spec from
 the instance you are talking to, because it is built from that server's
-configuration: where accounts are disabled it documents the writes as open and
-omits the OAuth endpoints entirely.
+configuration: where accounts are disabled it documents the writes as needing the
+instance `api_token`, or as open where there is no `api_token` either, and it
+omits the OAuth endpoints entirely. **Read that last case with the next section
+in hand**: an instance with neither credential takes a write only from the
+machine it runs on, which the document does not say.
 
 Its `servers` entry is the relative `/` unless the operator configured
 `base_url`, in which case it is that absolute URL. Relative is not a blank to
@@ -41,6 +44,93 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 `entry_diff` when you need to understand what changed.
 
 **MCP prompts** (`research/initialize`, `research/conduct`) return workflow instructions that tell you which tools to call in which order. `research/initialize` takes an optional `topic` argument; `research/conduct` requires `research_id`. They are the recommended starting point for new research projects, but every action they describe can also be done with individual tool calls.
+
+## Connecting Over HTTP: Which Credential This Instance Wants
+
+Over **stdio** nothing is asked of you: the client starts the process, and the
+process is the boundary. Everything in this section is about the two transports
+that arrive over a socket, and **the credential is the same one for both** — the
+gate exists to protect the 52 tools, not a particular door, and a token that
+closes one and not the other is not a credential:
+
+- **Streamable HTTP** on the web port (`:8088` by default), which is what
+  ChatGPT, Claude.ai and most current clients speak.
+- **The legacy SSE transport** on the MCP port (`:8081` by default, path `/sse`),
+  which exists only when the server was started with `--transport sse`.
+
+On the Streamable HTTP side two paths reach the same handler behind the same gate
+— `/mcp`, and the catch-all `/`, which hands a `POST` or `DELETE` carrying
+`Content-Type: application/json` or an `Mcp-Session-Id` header, and a `GET` with
+`Accept: text/event-stream`, to the MCP transport. Changing the path does not
+change what is asked of you. **Post to `/mcp` anyway**: the catch-all compares
+`Content-Type` for exact equality, so a request declaring
+`application/json; charset=utf-8` is not recognised as MCP there and is answered
+with the web UI's HTML instead.
+
+| Instance | Send | Refusal if you do not |
+|---|---|---|
+| **Accounts on** (`auth_enabled`) | `Authorization: Bearer <token>` — a JWT from `POST /api/auth/login`, an API key from `POST /api/auth/api-keys`, or an OAuth2 access token from `POST /auth/token`; the three are interchangeable | `401 {"error":"unauthorized"}`. On SSE the refusal also carries `WWW-Authenticate: Bearer resource_metadata="…"`, which is where OAuth discovery starts |
+| **Accounts off, instance `api_token` configured** | `Authorization: Bearer <api_token>` — the instance token, exactly as the REST writes take it | `401 {"error":"invalid or missing bearer token"}` |
+| **Neither configured** | nothing — but only a caller on the machine the server runs on is let in | `401 {"error":"the write API is disabled: set api_token or auth_enabled to accept writes from another machine"}` |
+
+**On SSE the credential may also travel as `?token=<token>`**, in the query
+string, and that is not a shortcut for the lazy: the `EventSource` API cannot set
+request headers, so for a browser-based SSE client it is the only place to put
+one. It holds for both credentials — an account token or the instance
+`api_token` — and the header is read first where both are present. Streamable
+HTTP takes the header only.
+
+**The middle row is the one that breaks a client that used to work.** An instance
+with an `api_token` and no accounts used to refuse an anonymous `POST
+/api/entries` and then hand the same caller every tool through `tools/call`, on
+either transport. Both doors now want that token. A connection that has started
+failing with `invalid or missing bearer token` is not missing an account: ask the
+operator for the instance `api_token` and send it as the bearer — or, on SSE, as
+`?token=`. There is no account to register for on such an instance —
+`POST /api/auth/register` does not exist there.
+
+**"On the machine the server runs on" is exact.** The connection's peer address
+must be loopback (`127.0.0.1`, `::1`) *and* the request must carry no
+`X-Forwarded-For`, `X-Real-IP` or `Forwarded` header. A reverse proxy adds one,
+and the proxy this project ships sits on the same host — so behind it every
+caller is remote whatever address the server sees. There is no header that makes
+you local; sending a forwarding header only makes you less so. This posture
+exists for the single-binary local run, not for an exposed port, and it gates
+**every tool**, reads included, because they reach the same services a write
+does. It guards the SSE listener on the same terms, so moving to the other port
+does not move you to another posture. REST *reads* are the exception in both
+credential-less postures: with accounts off they take no credential from
+anywhere, which is why a remote client can still fetch `/llms.txt`, the OpenAPI
+document and a research over HTTP while being refused both MCP transports.
+
+### Finding out which posture you are in
+
+Both probes below live on the **web port**, never on the SSE listener, which
+serves the transport and nothing else. An SSE client asks `:8088` what `:8081`
+will want of it.
+
+- `GET /api/auth/info` is public and answers on **every** instance, whether or
+  not accounts are configured: `{"auth_enabled": …, "allow_registration": …}`.
+  `auth_enabled: false` means accounts are off — it no longer means the route is
+  missing, so do not read a failure to fetch it as "accounts are on". It carries
+  `auto_login_token` only on a local instance running with `default_user`, and
+  only for a caller on that machine.
+- `GET /api/health` carries `write_api`, and it is now answered **per caller**:
+  `true` when an `api_token` is configured, or accounts are on, **or** the
+  request came from the server's own machine. Read it accordingly. Where a
+  credential is configured it says one exists, not that you hold it — `true`
+  alongside a `401` means you are the caller who has not presented it. Where
+  neither is configured it is genuinely about you: `true` to a local client and
+  `false` to a remote one, and a remote `false` is the same answer as the
+  refusal above. It also carries `auth_enabled`, `version` and `in_memory` —
+  `in_memory: true` means nothing survives a restart.
+
+### A path that does not exist answers in JSON
+
+Any path under `/api/` matching no route is `404 {"error":"no such endpoint"}` on
+every method, `GET` included, and a method a real path does not serve lands
+there too rather than in a `405`. Never read a `200` with an HTML body as an
+answer from this API: that is the web UI, and a stale path used to return it.
 
 ## Available MCP Tools
 

@@ -20,6 +20,7 @@ const meta: Meta<typeof ViewerNotice> = {
   tags: ['autodocs'],
   argTypes: {
     teamName: { control: 'text' },
+    reason: { control: 'select', options: ['viewer', 'remote'] },
   },
 }
 export default meta
@@ -46,6 +47,25 @@ export const LongTeamName: Story = {
  *  team undefined". */
 export const WithoutTeamName: Story = {
   args: {},
+}
+
+/**
+ * The other reason the controls are gone: no accounts are configured at all, so
+ * there are no roles and the server does not take changes from this machine.
+ *
+ * Deliberately not the viewer wording. "Your role in this team is viewer" would
+ * be false here and would send the reader looking for a person who does not
+ * exist — this reader needs a setting, so the sentence names the two. Hover, or
+ * read it with a screen reader; the visible text is the same two words.
+ */
+export const RemoteServer: Story = {
+  args: { reason: 'remote' },
+}
+
+/** A team name is ignored for that reason — there is no team to have got here
+ *  through. Guards against a caller passing both. */
+export const RemoteIgnoresTeamName: Story = {
+  args: { reason: 'remote', teamName: 'Аналитика рынка' },
 }
 
 /** Where it sits: in the research header, after the code, the title and the

@@ -140,7 +140,10 @@ required when `auth_enabled` is set, and readable by any member of the owning
 team — a `viewer` may read history and diffs. The restore is a write: it needs
 the token whenever `api_token` or `auth_enabled` is configured, and an `editor`
 or `owner` role. A `viewer` restoring gets `403` /
-`your role in this team does not allow this`.
+`your role in this team does not allow this`. With neither `api_token` nor
+`auth_enabled` configured it needs no credential but is accepted only from the
+machine the server runs on, like every other write in that mode — see
+[MCP Client Guide → Connecting Over HTTP](/llms/mcp-client-guide.md#connecting-over-http-which-credential-this-instance-wants).
 
 ## Restoring
 

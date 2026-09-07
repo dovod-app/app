@@ -37,6 +37,7 @@ const shareLocked = ref(false)
 
 export function useResearchRole() {
   const { authEnabled } = useAuth()
+  const { writeApi } = useServerInfo()
 
   function setFromResearch(research: { id?: string; role?: TeamRole | ''; team_name?: string } | null) {
     if (!research) return clear()
@@ -73,17 +74,24 @@ export function useResearchRole() {
     teamName.value = ''
   }
 
-  // With auth off there are no roles and everything is permitted — that is the
-  // single-binary local mode, and it must not render a read-only interface.
+  // With auth off there are no roles, so the question is not "what may this
+  // person do" but "will this server take a write from this browser at all".
+  //
+  // It used to be answered `true` unconditionally, which was right for the local
+  // single-binary mode and wrong everywhere else it applied: a server reached
+  // across a network with no api_token now refuses those writes, and a server
+  // with an api_token always did — the browser never holds one. Both rendered a
+  // full set of edit controls that returned 401. `write_api` on /api/health is
+  // the server answering it per caller.
   const canWrite = computed(() => {
     if (shareLocked.value) return false
-    if (!authEnabled.value) return true
+    if (!authEnabled.value) return writeApi.value
     return role.value === 'editor' || role.value === 'owner'
   })
 
   const canAdmin = computed(() => {
     if (shareLocked.value) return false
-    if (!authEnabled.value) return true
+    if (!authEnabled.value) return writeApi.value
     return role.value === 'owner'
   })
 
@@ -100,6 +108,21 @@ export function useResearchRole() {
      * viewer" would be a confusing thing to say to somebody with no account.
      */
     isViewer: computed(() => !shareLocked.value && !!authEnabled.value && role.value === 'viewer'),
+    /**
+     * Why the edit controls are missing, or null when they are not.
+     *
+     * `isViewer` above cannot answer this on its own: it requires
+     * `authEnabled`, and the second reason exists precisely where there are no
+     * accounts. Without this the eight pages that explain a viewer's missing
+     * controls explained nothing at all to a reader on a server that simply
+     * does not take writes from their machine — every control gone, and a 24px
+     * chip in the corner of the nav the only clue.
+     */
+    readOnlyReason: computed<'viewer' | 'remote' | null>(() => {
+      if (shareLocked.value) return null // the banner across the top already says it
+      if (!authEnabled.value) return writeApi.value ? null : 'remote'
+      return role.value === 'viewer' ? 'viewer' : null
+    }),
     setFromResearch,
     lockForShare,
     clear,
