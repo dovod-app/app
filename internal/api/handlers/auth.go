@@ -206,6 +206,15 @@ func (h *AuthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 	// password, so that is the only caller it is served to. The predicate is the
 	// one the write gate uses; a second reading of "is this local" is how the
 	// two drift apart.
+	//
+	// Known limit, tracked in #118: an L4 forwarder on the same host (nginx
+	// `stream {}`, HAProxy in TCP mode, `ssh -L`) adds no header and leaves the
+	// peer address loopback, so a remote caller who also controls the Host
+	// header satisfies auth.LocalRequest. On this route that yields the
+	// default_user's 30-day JWT, not merely an anonymous write — which makes it
+	// the sharpest consequence of that gap. Binding the listener to loopback
+	// when no credential is configured is the fix; it is a deployment-visible
+	// decision and has its own issue.
 	if h.autoLoginToken != "" && auth.LocalRequest(r) {
 		resp["auto_login_token"] = h.autoLoginToken
 	}

@@ -1675,7 +1675,7 @@ func NewServer(
 			"status":       {Type: "string", Description: "Always `ok`."},
 			"version":      {Type: "string"},
 			"in_memory":    {Type: "boolean", Description: "True when the database is in memory and nothing survives a restart."},
-			"write_api":    {Type: "boolean", Description: "Whether **this caller** can write: an `api_token` is set, or accounts are on, or the request came from the machine the server runs on. It answers per caller because with no credential configured the answer genuinely differs — a local browser may write and a remote client may not."},
+			"write_api":    {Type: "boolean", Description: "Whether the server would accept a write from **this request** — not whether a credential is configured somewhere. With accounts on it is `true` and your role decides the rest. With an `api_token` and no accounts it is `true` only when this request presented that token, so a browser holding none is told `false`. With neither configured it is `true` to a caller on the server's own machine and `false` to everyone else."},
 			"auth_enabled": {Type: "boolean"},
 		}, "status")).
 		build(), func(w http.ResponseWriter, r *http.Request) {
@@ -1697,6 +1697,16 @@ func NewServer(
 		case cfg.AuthEnabled:
 		case cfg.APIToken != "":
 			writeAPI = operatorCredential(cfg.APIToken, r)
+			// A wrong token presented here is a guess, and this route answers
+			// 200 either way — so without this line it is the one place an
+			// attacker can test candidate tokens and read the verdict while
+			// leaving no trace, when the same guess against a write logs.
+			// Only a presented-and-wrong credential is logged: the ordinary
+			// unauthenticated health check is every monitor in the world.
+			if !writeAPI && r.Header.Get("Authorization") != "" {
+				log.Warn("health: bearer token presented and rejected",
+					"remote", r.RemoteAddr, "host", r.Host)
+			}
 		default:
 			writeAPI = auth.LocalRequest(r)
 		}

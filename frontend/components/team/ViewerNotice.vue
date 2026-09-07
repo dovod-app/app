@@ -33,7 +33,13 @@ const props = defineProps<{
 
 const explanation = computed(() => {
   if (props.reason === 'remote') {
-    return 'This server accepts changes only from the machine it runs on. To edit from here, turn on accounts with auth_enabled, or connect a tool with the api_token.'
+    // Deliberately not "only from the machine it runs on": that is true of one
+    // of the two credential-less postures and false of the other. Where an
+    // api_token is configured the local browser is refused too — it holds no
+    // token — and a tool that has the token works from anywhere. One sentence
+    // has to cover both, so it says what the browser lacks rather than where
+    // the browser is.
+    return 'This server does not accept changes from a browser. Turn on accounts with auth_enabled to sign in and edit here, or make changes through a tool holding the api_token.'
   }
   return props.teamName
     ? `You have read-only access to this project through the team ${props.teamName}.`

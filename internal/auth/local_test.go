@@ -41,6 +41,15 @@ func TestLocalRequest(t *testing.T) {
 			map[string]string{"X-Real-IP": "203.0.113.7"}, false},
 		{"proxied, Forwarded", "127.0.0.1:54321", "localhost:8088",
 			map[string]string{"Forwarded": "for=203.0.113.7"}, false},
+		// A proxy that rewrites Host to the upstream and records the original
+		// passes the address and the Host checks. This header is the only thing
+		// left that says a proxy was there.
+		{"proxied, X-Forwarded-Host only", "127.0.0.1:54321", "localhost:8088",
+			map[string]string{"X-Forwarded-Host": "research.example.com"}, false},
+		{"proxied, X-Forwarded-Proto only", "127.0.0.1:54321", "localhost:8088",
+			map[string]string{"X-Forwarded-Proto": "https"}, false},
+		{"proxied, X-Forwarded-Port only", "127.0.0.1:54321", "localhost:8088",
+			map[string]string{"X-Forwarded-Port": "443"}, false},
 		{"empty header value is still a header", "127.0.0.1:54321", "localhost:8088",
 			map[string]string{"X-Forwarded-For": ""}, false},
 		// A proxy that sets no forwarding header at all is caught only when it

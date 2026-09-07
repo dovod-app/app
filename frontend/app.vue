@@ -45,7 +45,7 @@ const { version, writeApi } = useServerInfo()
 // Same sentence TeamViewerNotice gives for its `remote` reason. The nav badge
 // is the only explanation on pages that are not research-scoped.
 const readOnlyExplanation =
-  'This server accepts changes only from the machine it runs on. To edit from here, turn on accounts with auth_enabled, or connect a tool with the api_token.'
+  'This server does not accept changes from a browser. Turn on accounts with auth_enabled to sign in and edit here, or make changes through a tool holding the api_token.'
 
 const route = useRoute()
 // Pages that render without nav or footer. The invitation page joins them

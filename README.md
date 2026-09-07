@@ -212,8 +212,10 @@ reachable HTTPS deployment of Dovod.
 
 Streamable HTTP uses the web port. Legacy SSE is also available at
 `:8081/sse` when running with `--transport sse`; expose that port only if your
-client uses it. It expects the same credential, as a bearer header or a
-`?token=` parameter for clients that cannot set headers.
+client uses it. It expects the same credential as a bearer header. An account
+token may instead go in a `?token=` parameter, for clients that cannot set
+headers; the instance `api_token` may not — a query string ends up in every
+proxy log, and that token does not rotate.
 
 ### Let a local client start the binary
 

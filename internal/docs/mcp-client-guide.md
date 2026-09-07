@@ -73,28 +73,46 @@ with the web UI's HTML instead.
 | **Accounts off, instance `api_token` configured** | `Authorization: Bearer <api_token>` — the instance token, exactly as the REST writes take it | `401 {"error":"invalid or missing bearer token"}` |
 | **Neither configured** | nothing — but only a caller on the machine the server runs on is let in | `401 {"error":"the write API is disabled: set api_token or auth_enabled to accept writes from another machine"}` |
 
-**On SSE the credential may also travel as `?token=<token>`**, in the query
+**On SSE an *account* token may also travel as `?token=<token>`**, in the query
 string, and that is not a shortcut for the lazy: the `EventSource` API cannot set
 request headers, so for a browser-based SSE client it is the only place to put
-one. It holds for both credentials — an account token or the instance
-`api_token` — and the header is read first where both are present. Streamable
-HTTP takes the header only.
+one. The header is read first where both are present.
+
+**The instance `api_token` is refused in the query string**, on every transport
+including SSE — `?token=<api_token>` gets the same `401` as sending nothing. An
+account token is scoped to one person and can be revoked on its own; the
+instance token is the longest-lived, highest-privilege secret the server has, it
+does not rotate, and a query string is written verbatim into every proxy access
+log, browser history and `Referer`. Send it as `Authorization: Bearer
+<api_token>` or not at all.
 
 **The middle row is the one that breaks a client that used to work.** An instance
 with an `api_token` and no accounts used to refuse an anonymous `POST
 /api/entries` and then hand the same caller every tool through `tools/call`, on
 either transport. Both doors now want that token. A connection that has started
 failing with `invalid or missing bearer token` is not missing an account: ask the
-operator for the instance `api_token` and send it as the bearer — or, on SSE, as
-`?token=`. There is no account to register for on such an instance —
+operator for the instance `api_token` and send it as the bearer — as a header, on
+SSE too. There is no account to register for on such an instance —
 `POST /api/auth/register` does not exist there.
 
-**"On the machine the server runs on" is exact.** The connection's peer address
-must be loopback (`127.0.0.1`, `::1`) *and* the request must carry no
-`X-Forwarded-For`, `X-Real-IP` or `Forwarded` header. A reverse proxy adds one,
-and the proxy this project ships sits on the same host — so behind it every
-caller is remote whatever address the server sees. There is no header that makes
-you local; sending a forwarding header only makes you less so. This posture
+**"On the machine the server runs on" is exact, and it is four conditions.**
+
+1. The connection's peer address is loopback (`127.0.0.1`, `::1`).
+2. The request carries no `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header.
+   A reverse proxy adds one, and the proxy this project ships sits on the same
+   host — so behind it every caller is remote whatever address the server sees.
+3. The `Host` header names a loopback address (`localhost`, `127.0.0.1`, `[::1]`,
+   with or without a port). **Reaching the same server by its LAN address or its
+   hostname is refused** even from the same machine: `http://192.168.1.5:8088`
+   and `http://my-laptop.local:8088` both fail this, and so does a name that
+   resolves to `127.0.0.1` from outside. Use `localhost`.
+4. `Origin`, when the request carries one, also names a loopback address. Without
+   this the whole rule is bypassable by any web page the operator visits — the
+   server answers with `Access-Control-Allow-Origin: *`, so a script on another
+   site can reach `127.0.0.1` through the operator's own browser.
+
+There is no header that makes you local; sending a forwarding header, or an
+`Origin` from anywhere else, only makes you less so. This posture
 exists for the single-binary local run, not for an exposed port, and it gates
 **every tool**, reads included, because they reach the same services a write
 does. It guards the SSE listener on the same terms, so moving to the other port
@@ -115,14 +133,15 @@ will want of it.
   missing, so do not read a failure to fetch it as "accounts are on". It carries
   `auto_login_token` only on a local instance running with `default_user`, and
   only for a caller on that machine.
-- `GET /api/health` carries `write_api`, and it is now answered **per caller**:
-  `true` when an `api_token` is configured, or accounts are on, **or** the
-  request came from the server's own machine. Read it accordingly. Where a
-  credential is configured it says one exists, not that you hold it — `true`
-  alongside a `401` means you are the caller who has not presented it. Where
-  neither is configured it is genuinely about you: `true` to a local client and
-  `false` to a remote one, and a remote `false` is the same answer as the
-  refusal above. It also carries `auth_enabled`, `version` and `in_memory` —
+- `GET /api/health` carries `write_api`, and it answers about **this request**,
+  not about the instance: whether the server would accept a write from the
+  caller asking. With accounts on it is `true` — the route carries no session to
+  check, and your role decides the rest. With an `api_token` and no accounts it
+  is `true` only when *this* request presented that token, so a browser holding
+  none is told `false`, which is the truth and is why the web UI stops rendering
+  Edit there. With neither configured it is `true` to a local client and `false`
+  to a remote one, the same answer as the refusal above.
+  It also carries `auth_enabled`, `version` and `in_memory` —
   `in_memory: true` means nothing survives a restart.
 
 ### A path that does not exist answers in JSON

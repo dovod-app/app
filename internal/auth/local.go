@@ -9,8 +9,18 @@ import (
 
 // forwardingHeaders are the headers a reverse proxy adds when it passes a
 // request on. Only their presence is ever read — see LocalRequest.
+//
+// The list is deliberately wider than "the ones that carry an address". A proxy
+// that sets only `X-Forwarded-Host` — rewriting the Host to the upstream while
+// recording the original — passes both of the other conditions, and the first
+// version of this list judged such a caller local. Every entry here can only
+// ever make a request *less* local, so an over-broad list costs nothing and a
+// missing one is a hole.
 var forwardingHeaders = []string{
 	http.CanonicalHeaderKey("X-Forwarded-For"),
+	http.CanonicalHeaderKey("X-Forwarded-Host"),
+	http.CanonicalHeaderKey("X-Forwarded-Proto"),
+	http.CanonicalHeaderKey("X-Forwarded-Port"),
 	http.CanonicalHeaderKey("X-Real-IP"),
 	http.CanonicalHeaderKey("Forwarded"),
 }
