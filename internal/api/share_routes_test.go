@@ -1377,3 +1377,171 @@ func TestShareRoutes_UpdateChangesALiveLinkInPlace(t *testing.T) {
 		t.Errorf("update of an unknown share: %d, want 404", code)
 	}
 }
+
+// The crossref routes are mounted ungated, because documents are always in a
+// link. The rows they serve are not: a reference is written by a task or by an
+// answer just as readily as by a document, and each row carries the source's id
+// and the code it cites.
+//
+// So a link with tasks and sessions off was handing over the task ids in that
+// research, and the summary's `total` climbed the second a task was created —
+// the same "something just happened in there" the WebSocket filter withholds.
+// The route stays ungated; the rows are filtered per row instead.
+func TestShareRoutes_CrossRefsRespectTheIncludeFlags(t *testing.T) {
+	s := newShareServer(t)
+
+	read := func(token string) string {
+		t.Helper()
+		code, body := s.get("/api/shared/" + token + "/researches/" + s.research.ID + "/crossrefs")
+		if code != http.StatusOK {
+			t.Fatalf("crossrefs through a share link: %d %s", code, body)
+		}
+		return body
+	}
+	count := func(body string) (int, int) {
+		t.Helper()
+		var payload struct {
+			Count   int `json:"count"`
+			Summary struct {
+				Total int `json:"total"`
+			} `json:"summary"`
+		}
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return payload.Count, payload.Summary.Total
+	}
+
+	// The fixture writes references of its own, so the arithmetic below is a
+	// baseline plus one rather than a literal.
+	baseline, _ := count(read(s.newShare(domain.ShareInclude{})))
+
+	// One row per source kind, seeded directly: what matters here is the filter,
+	// not which service wrote them.
+	seed := []struct{ sourceType, sourceID string }{
+		{"entry", s.entry.ID},
+		{"task", "task-source-id"},
+		{"question", "question-source-id"},
+	}
+	for _, row := range seed {
+		if _, err := s.db.ExecContext(context.Background(),
+			`INSERT INTO crossrefs (source_type, source_id, source_research_id, target_ref, resolved)
+			 VALUES (?, ?, ?, 'E404', 0)`, row.sourceType, row.sourceID, s.research.ID); err != nil {
+			t.Fatalf("seed %s crossref: %v", row.sourceType, err)
+		}
+	}
+
+	// Content only: the document's own reference and nothing else.
+	body := read(s.newShare(domain.ShareInclude{}))
+	if !strings.Contains(body, s.entry.ID) {
+		t.Errorf("a document's own reference was withheld from a content link: %s", body)
+	}
+	for _, hidden := range []string{"task-source-id", "question-source-id"} {
+		if strings.Contains(body, hidden) {
+			t.Errorf("a link with tasks and sessions off exposed %s: %s", hidden, body)
+		}
+	}
+
+	// The count travels with the rows. A summary computed before the filter
+	// would report three here and three under every other link, which is the
+	// activity signal all over again in a single integer.
+	if got, total := count(body); got != baseline+1 || total != baseline+1 {
+		t.Errorf("content-only link reported count=%d total=%d, want %d for both — the two rows"+
+			" written by a task and by an answer are counted as well as served",
+			got, total, baseline+1)
+	}
+	if got, _ := count(read(s.newShare(domain.ShareInclude{Tasks: true, Sessions: true}))); got != baseline+3 {
+		t.Errorf("a link including tasks and sessions counted %d references, want %d", got, baseline+3)
+	}
+
+	// With both parts included, the same rows come back.
+	full := read(s.newShare(domain.ShareInclude{Tasks: true, Sessions: true}))
+	for _, wanted := range []string{"task-source-id", "question-source-id"} {
+		if !strings.Contains(full, wanted) {
+			t.Errorf("a link including tasks and sessions withheld %s: %s", wanted, full)
+		}
+	}
+
+	// One flag at a time, because "tasks" and "sessions" are separate promises
+	// and a filter that reads either flag for both rows passes the test above.
+	tasksOnly := read(s.newShare(domain.ShareInclude{Tasks: true}))
+	if !strings.Contains(tasksOnly, "task-source-id") || strings.Contains(tasksOnly, "question-source-id") {
+		t.Errorf("a tasks-only link did not carry exactly the task row: %s", tasksOnly)
+	}
+	sessionsOnly := read(s.newShare(domain.ShareInclude{Sessions: true}))
+	if !strings.Contains(sessionsOnly, "question-source-id") || strings.Contains(sessionsOnly, "task-source-id") {
+		t.Errorf("a sessions-only link did not carry exactly the answer row: %s", sessionsOnly)
+	}
+}
+
+// A resolved reference INTO a part the link leaves out is admitted as far as
+// its text and no further. `[[T4]]` resolved says "this research really has a
+// T4" — the fact a link with tasks off exists to withhold — and a roadmap
+// target carries the roadmap's id outright.
+func TestShareRoutes_CrossRefTargetsRespectTheIncludeFlags(t *testing.T) {
+	s := newShareServer(t)
+
+	if _, err := s.db.ExecContext(context.Background(),
+		`INSERT INTO crossrefs (source_type, source_id, source_research_id, target_research_id, target_ref, resolved)
+		 VALUES ('entry', ?, ?, ?, 'T4', 1)`, s.entry.ID, s.research.ID, s.research.ID); err != nil {
+		t.Fatalf("seed task-target crossref: %v", err)
+	}
+	if _, err := s.db.ExecContext(context.Background(),
+		`INSERT INTO crossrefs (source_type, source_id, source_research_id, target_roadmap_id, target_ref, resolved)
+		 VALUES ('entry', ?, ?, 'roadmap-target-id', 'RM1', 1)`, s.entry.ID, s.research.ID); err != nil {
+		t.Fatalf("seed roadmap-target crossref: %v", err)
+	}
+
+	decode := func(token string) map[string]bool {
+		t.Helper()
+		code, body := s.get("/api/shared/" + token + "/researches/" + s.research.ID + "/crossrefs")
+		if code != http.StatusOK {
+			t.Fatalf("crossrefs through a share link: %d %s", code, body)
+		}
+		var payload struct {
+			Data []struct {
+				TargetRef string `json:"target_ref"`
+				Resolved  bool   `json:"resolved"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		out := map[string]bool{}
+		for _, ref := range payload.Data {
+			out[ref.TargetRef] = ref.Resolved
+		}
+		return out
+	}
+
+	// The rows are still served — the codes are in the prose the visitor is
+	// reading, and hiding the row would not unsay them. What is withheld is the
+	// confirmation that the thing they name exists.
+	narrowToken := s.newShare(domain.ShareInclude{})
+	if body := read2(s, t, narrowToken); strings.Contains(body, "roadmap-target-id") {
+		t.Errorf("a link with roadmaps off handed over a roadmap id: %s", body)
+	}
+	narrow := decode(narrowToken)
+	if narrow["T4"] {
+		t.Error("a link with tasks off confirmed that T4 exists")
+	}
+	if narrow["RM1"] {
+		t.Error("a link with roadmaps off confirmed that RM1 exists")
+	}
+
+	full := decode(s.newShare(domain.ShareInclude{Tasks: true, Roadmaps: true}))
+	if !full["T4"] || !full["RM1"] {
+		t.Errorf("a link including tasks and roadmaps left its own references inert: %v", full)
+	}
+}
+
+// read2 is the raw body of the shared crossrefs route, for the assertions that
+// are about a string rather than about a decoded row.
+func read2(s *shareServer, t *testing.T, token string) string {
+	t.Helper()
+	code, body := s.get("/api/shared/" + token + "/researches/" + s.research.ID + "/crossrefs")
+	if code != http.StatusOK {
+		t.Fatalf("crossrefs through a share link: %d %s", code, body)
+	}
+	return body
+}

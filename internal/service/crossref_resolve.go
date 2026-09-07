@@ -124,19 +124,23 @@ func (s *EntryService) ResolveDanglingResearch(ctx context.Context, researchID, 
 		domain.CrossRef{TargetResearchID: researchID})
 }
 
-// resolveDangling runs the repair and announces it.
+// resolveDangling runs the repair and announces it to the researches whose rows
+// actually moved — one event each, and none at all when nothing moved.
 //
-// The event carries the research the *target* lives in, which is not
-// necessarily where the repaired references were written: a `[[R3:E20]]` in
-// research R1 is repaired when E20 appears in R3. Sources elsewhere therefore
-// do not repaint until they are next loaded. That is the honest limit of one
-// event with one research id, and it is the uncommon direction — the ordinary
-// forward reference is written and repaired inside one research.
+// The research the event names is the one holding the *source*, not the target.
+// A `[[R3:E20]]` written in R1 is repaired when E20 appears in R3: R1 is the
+// page that changed and must repaint, and R3 has learned nothing it is entitled
+// to know. The first version sent one event on the target's research, which got
+// both halves wrong — it told a tenant that an unseen research cites them, and
+// left the page that had actually changed stale until someone reloaded it.
+//
+// In the ordinary case the reference is written and repaired inside one
+// research, and this sends exactly the one event it always did.
 func (s *EntryService) resolveDangling(ctx context.Context, researchID string, matches []storage.DanglingMatch, target domain.CrossRef) {
 	if s.crossrefs == nil || len(matches) == 0 {
 		return
 	}
-	n, err := s.crossrefs.ResolveDangling(ctx, matches, target)
+	sources, err := s.crossrefs.ResolveDangling(ctx, matches, target)
 	if err != nil {
 		// Never fatal to the create that triggered it. The entity exists and is
 		// correct; its inbound links are stale, which is what the rebuild
@@ -144,14 +148,13 @@ func (s *EntryService) resolveDangling(ctx context.Context, researchID string, m
 		s.log.Error("failed to resolve dangling crossrefs", "research_id", researchID, "error", err)
 		return
 	}
-	if n == 0 {
-		return
+	for _, source := range sources {
+		// Same entity as the rebuild emits, so the pages already listening for
+		// "the link table moved" need no new case.
+		emit(ctx, s.events, Event{
+			Type: "crossrefs.resolved", ResearchID: source, EntityID: source, Entity: "crossref",
+		})
 	}
-	// Same entity as the rebuild emits, so the pages already listening for
-	// "the link table moved" need no new case.
-	emit(ctx, s.events, Event{
-		Type: "crossrefs.resolved", ResearchID: researchID, EntityID: researchID, Entity: "crossref",
-	})
 }
 
 // resolveResearchID turns an R code into a research id, and leaves a uuid

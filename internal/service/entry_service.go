@@ -916,16 +916,26 @@ func (s *EntryService) resolveRefs(ctx context.Context, sourceType, sourceID, re
 			// [[E3]] or [[R2:E5]] — link to an entry
 			if first != "" {
 				// Cross-research: [[R2:E5]]
+				//
+				// The target research's id is stored only if the entry is found
+				// too. It used to be stored the moment R2 resolved, which made
+				// the row itself an answer to "does R2 exist" — a question the
+				// author is not entitled to ask about a research they have no
+				// role on. Writing [[R1:E1]], [[R2:E1]], … and reading the rows
+				// back enumerated other tenants' researches without a single
+				// link ever resolving. VisibleCrossRefs blanks it on the way out
+				// as well, for the rows already written.
 				targetResearch, err := s.researches.FindByCode(ctx, first)
 				if err == nil && targetResearch != nil {
-					cr.TargetResearchID = targetResearch.ID
 					if second != "" {
 						targetEntry, err := s.entries.FindByCode(ctx, targetResearch.ID, second)
 						if err == nil && targetEntry != nil {
+							cr.TargetResearchID = targetResearch.ID
 							cr.TargetEntryID = targetEntry.ID
 							cr.Resolved = true
 						}
 					} else {
+						cr.TargetResearchID = targetResearch.ID
 						cr.Resolved = true
 					}
 				}
