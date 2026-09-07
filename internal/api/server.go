@@ -318,6 +318,22 @@ func NewServer(
 	sDeleted := envelope(map[string]*huma.Schema{
 		"deleted": {Type: "boolean"},
 	})
+	sDeletionSummary := envelope(map[string]*huma.Schema{
+		"sections":      {Type: "integer"},
+		"entries":       {Type: "integer"},
+		"sessions":      {Type: "integer"},
+		"questions":     {Type: "integer"},
+		"tasks":         {Type: "integer"},
+		"roadmaps":      {Type: "integer"},
+		"annotations":   {Type: "integer"},
+		"shares":        {Type: "integer", Description: "Live share links, which stop working immediately."},
+		"incoming_refs": {Type: "integer", Description: "References from other projects into this one. **Not deleted** — they survive as the text that was written and stop resolving, because removing them would edit a project nobody asked to change."},
+		"incoming_from": {Type: "array", Description: "Which projects those references are in, capped at ten. The count is the decision; these are so it is not an abstraction.",
+			Items: &huma.Schema{Type: "object", Properties: map[string]*huma.Schema{
+				"code": {Type: "string"},
+				"name": {Type: "string"},
+			}}},
+	})
 
 	// --- Auth endpoints (only when auth enabled) ---
 	if cfg.AuthEnabled && authSvc != nil {
@@ -1004,6 +1020,32 @@ func NewServer(
 		returns("200", "The updated section.", envelope(map[string]*huma.Schema{"data": sSection})).
 		build(), wh.UpdateSection)
 
+	rt.route(accessWrite, op("DELETE", "/api/sections/{sectionId}", "Delete a section",
+		"Removes a section. **Refuses with 409 while it still holds documents**, naming how many, unless `force=true` — deleting a section that silently takes five documents with it is the accident the confirmation exists to prevent, and an API that makes it a one-liner has moved the accident rather than removed it.\n\n"+
+			"With `force=true` the documents go too, along with the cross-references and external links extracted from them. References *to* those documents from elsewhere stay as written and stop resolving.").
+		tag("Research").
+		queryBool("force", "Delete the section even though it holds documents, and delete them with it.").
+		returns("200", "Deleted.", sDeleted).
+		responds("409", "The section holds documents and `force` was not set. The message names how many.").
+		build(), wh.DeleteSection)
+
+	rt.route(accessRead, op("GET", "/api/researches/{id}/delete-preview", "What deleting this project would destroy",
+		"Counts, per kind, what a delete would take with it, plus the references from *other* projects that would stop resolving — those survive as inert text rather than being removed, because deleting them would edit a project nobody asked to change.\n\n"+
+			"A read, not a write: it is shown before the confirmation, and an editor who may not delete still needs to be told what the control they cannot use would do.").
+		tag("Research").
+		returns("200", "What would be destroyed.", envelope(map[string]*huma.Schema{"data": sDeletionSummary})).
+		build(), wh.DeletePreview)
+
+	rt.route(accessWrite, op("DELETE", "/api/researches/{id}", "Delete a project",
+		"Destroys the project and everything under it: sections, documents and their revisions, sessions and questions, tasks, roadmaps, annotations, memory, share links and attached methodologies.\n\n"+
+			"**Real deletion, not an archive.** There is no tombstone and no trash bin — the promise is that your data is a file you own, and a hidden graveyard inside that file is the opposite of it. `PUT /api/researches/{id}` with `status: \"archived\"` is the reversible path.\n\n"+
+			"**Owner only.** An editor is trusted with the contents of a project and not with its existence. Someone with no access at all gets 404, because confirming the project exists is itself information.\n\n"+
+			"References from other projects into this one are *not* deleted: they stop resolving and render as the text that was written.").
+		tag("Research").
+		returns("200", "Deleted.", sDeleted).
+		responds("403", "You are not the owner of this project.").
+		build(), wh.DeleteResearch)
+
 	rt.route(accessWrite, op("POST", "/api/entries", "Create a document",
 		"Files a document under a section and allocates its short code (`E1`, `E2`, ...). Any `[[...]]` references in the content are extracted and recorded.").
 		tag("Documents").
@@ -1095,6 +1137,19 @@ func NewServer(
 		body("The fields to change.", sUpdateSession).
 		returns("200", "The updated session.", envelope(map[string]*huma.Schema{"data": sSession})).
 		build(), wh.UpdateSession)
+
+	rt.route(accessWrite, op("DELETE", "/api/sessions/{id}", "Delete a session",
+		"Removes the session and the questions asked in it.\n\n"+
+			"Documents written during the session **survive**, with their link to it cleared. A finding is not an artefact of the conversation that produced it, and deleting a transcript should not delete the conclusions drawn in it.").
+		tag("Sessions").
+		returns("200", "Deleted.", sDeleted).
+		build(), wh.DeleteSession)
+
+	rt.route(accessWrite, op("DELETE", "/api/questions/{questionId}", "Delete a question",
+		"Removes one question and any references it carried. Follow-up questions asked under it survive, with their parent link cleared, rather than disappearing with it.").
+		tag("Sessions").
+		returns("200", "Deleted.", sDeleted).
+		build(), wh.DeleteQuestion)
 
 	rt.route(accessWrite, op("PUT", "/api/questions/{questionId}", "Answer or edit a question",
 		"Records an answer, or changes the question. Answers may carry `[[...]]` references like any other text, and they are rendered as links wherever they appear.").

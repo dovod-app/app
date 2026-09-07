@@ -51,6 +51,7 @@
         :research="r"
         @tag-click="tagFilter = $event"
         @status-changed="refreshList"
+        @delete="askDelete(r)"
       />
     </div>
 
@@ -91,6 +92,21 @@
       title="Start your first project"
       description="Ask your connected AI assistant to help you define a goal and get started:"
       command="Use the research/initialize prompt to start a new project in Dovod."
+    />
+
+    <ResearchDeleteResearchDialog
+      v-if="deleting"
+      :visible="!!deleting"
+      :code="deleting.code || deleting.id"
+      :name="deleting.name"
+      :summary="del.summary.value"
+      :loading="del.loading.value"
+      :summary-failed="del.summaryFailed.value"
+      :busy="del.busy.value"
+      :failure="del.failure.value"
+      :permanently-refused="del.permanentlyRefused.value"
+      @cancel="deleting = null"
+      @confirm="confirmDelete"
     />
   </div>
 </template>
@@ -171,6 +187,34 @@ const apiUrl = computed(() => {
   const query = params.toString()
   return query ? `/api/researches?${query}` : '/api/researches'
 })
+
+/* --- Deleting a project from the list --- */
+const del = useResearchDelete()
+const deleting = ref<any | null>(null)
+const listToasts = useToasts()
+
+function askDelete(research: any) {
+  deleting.value = research
+  del.reset()
+  void del.loadSummary(research.code || research.id)
+}
+
+async function confirmDelete() {
+  const target = deleting.value
+  if (!target) return
+  const outcome = await del.remove(target.code || target.id)
+  if (outcome === 'failed') return
+  deleting.value = null
+  // The list is where they already are, so there is nowhere to navigate — it
+  // just loses a card. Deleting the last one leaves the getting-started state
+  // the page already renders.
+  await refreshList()
+  if (outcome === 'already-gone') {
+    listToasts.push({ variant: 'info', title: 'Already deleted', message: `“${target.name}” had already been removed.` })
+  } else {
+    listToasts.push({ variant: 'success', title: 'Project deleted', message: `“${target.name}” and everything in it has been removed.` })
+  }
+}
 
 const { data, pending, refresh } = useApi<{ data: any[] }>(apiUrl.value)
 

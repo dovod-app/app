@@ -67,6 +67,33 @@ func (a *Access) Write(ctx context.Context, researchID string) error {
 	return nil
 }
 
+// Admin allows only an owner. It is the gate for the operations that dispose of
+// a research rather than change what is inside it — deleting it, and moving it
+// between teams.
+//
+// Separate from Write because an editor is trusted with the contents and not
+// with the container: an editor who deletes a research destroys work belonging
+// to everyone else in the team, and no amount of confirmation dialog makes that
+// their decision to take.
+func (a *Access) Admin(ctx context.Context, researchID string) error {
+	// A share is read-only, said here rather than left to fall out of the
+	// viewer role it resolves to — the same one greppable line Write carries.
+	if auth.ShareFromContext(ctx) != nil {
+		return ErrForbidden
+	}
+	role, err := a.Role(ctx, researchID)
+	if err != nil {
+		return err
+	}
+	// An empty role means there is no authenticated caller at all, which Role
+	// has already allowed: the local single-binary mode, where there are no
+	// roles to be owner of.
+	if role != "" && role != domain.TeamOwner {
+		return ErrForbidden
+	}
+	return nil
+}
+
 // Role resolves the caller's role, or ErrNotFound when the research is absent
 // or belongs to a team they are not in. An empty role with a nil error means
 // there is no authenticated caller at all.

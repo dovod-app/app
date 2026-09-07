@@ -44,6 +44,12 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Export
             </NuxtLink>
+            <template v-if="canWrite">
+              <div class="action-menu-divider"></div>
+              <button class="action-menu-item action-menu-item--danger" @click="confirmDeleteSession = true">
+                Delete session
+              </button>
+            </template>
           </ActionMenu>
         </div>
       </div>
@@ -202,6 +208,17 @@
   </div>
 
   <EmptyState v-else icon="&#x1F50D;" title="Session not found" />
+
+  <ConfirmModal
+    :visible="confirmDeleteSession"
+    variant="danger"
+    title="Delete session"
+    :message="deleteSessionMessage"
+    confirm-label="Delete"
+    :loading="deletingSession"
+    @confirm="deleteSession"
+    @cancel="confirmDeleteSession = false"
+  />
 </template>
 
 <script setup lang="ts">
@@ -252,6 +269,39 @@ watch(() => session.value?.notes, () => {
 })
 onMounted(renderNotes)
 const questions = computed(() => data.value?.data?.questions ?? data.value?.data?.Questions ?? {})
+
+/* --- Deleting the session --- */
+const confirmDeleteSession = ref(false)
+const deletingSession = ref(false)
+
+/* "Documents filed during it are kept" is true because entries.session_id is
+   ON DELETE SET NULL in all three dialects. If that ever changes, this sentence
+   has to change with it — it is a promise about the database. */
+const deleteSessionMessage = computed(() => {
+  const title = session.value?.title ?? 'This session'
+  const n = progress.value.total
+  const middle =
+    n === 0 ? 'is deleted' : n === 1 ? 'and the one question in it are deleted' : `and its ${n} questions are deleted`
+  return `“${title}” ${middle}. Documents filed during it are kept. This cannot be undone.`
+})
+
+async function deleteSession() {
+  deletingSession.value = true
+  try {
+    await authFetch(`${rtBase}/api/sessions/${session.value.id}`, { method: 'DELETE' })
+    confirmDeleteSession.value = false
+    await navigateTo(`/research/${researchSlug.value}/sessions`)
+    useToasts().push({
+      variant: 'success',
+      title: 'Session deleted',
+      message: `“${session.value?.title ?? 'The session'}” has been removed.`,
+    })
+  } catch (e: any) {
+    useToasts().error(e?.data?.error ?? 'The server refused it.', 'Could not delete session')
+  } finally {
+    deletingSession.value = false
+  }
+}
 const progress  = computed(() => ({
   total:    data.value?.data?.progress?.total    ?? 0,
   answered: data.value?.data?.progress?.answered ?? 0,

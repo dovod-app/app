@@ -5,16 +5,25 @@
         <span v-if="research.code" class="short-code">{{ research.code }}</span>
         <h3 class="card-title">{{ research.name }}</h3>
       </div>
-      <div class="card-header-actions">
-        <button
-          v-if="canArchive"
-          class="btn-icon"
-          :title="research.status === 'archived' ? 'Restore from archive' : 'Archive'"
-          @click.prevent.stop="toggleArchive"
-        >
-          <svg v-if="research.status === 'archived'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        </button>
+      <!-- .prevent as well as .stop, and on the wrapper: the card's root is a
+           NuxtLink, and ActionMenu's trigger stops propagation without
+           preventing the default — which blocks the router but not the
+           browser, so the `<a>` still navigates and the SPA reloads. The
+           wrapper's preventDefault runs after the inner button's handler and
+           has no effect on a `<button>`, so the items keep working. Do not put
+           NuxtLinks inside this menu. -->
+      <div class="card-header-actions" @click.prevent.stop>
+        <ActionMenu v-if="canArchive" title="Project actions" align="right">
+          <button class="action-menu-item" @click="toggleArchive">
+            {{ research.status === 'archived' ? 'Restore from archive' : 'Archive' }}
+          </button>
+          <template v-if="canDelete">
+            <div class="action-menu-divider" />
+            <button class="action-menu-item action-menu-item--danger" @click="emit('delete')">
+              Delete project
+            </button>
+          </template>
+        </ActionMenu>
         <StatusBadge :status="research.status" />
       </div>
     </div>
@@ -69,21 +78,33 @@ const showTeam = computed(() => !!props.research.team_name && !props.research.te
 // into a permissions report.
 const isViewer = computed(() => props.research.role === 'viewer')
 const canArchive = computed(() => props.research.role !== 'viewer')
+// Deleting destroys work belonging to everyone else in the team, so an editor
+// is not enough. With auth off there are no roles and the field is absent,
+// which is the local single-user case: that person owns everything.
+const canDelete = computed(() => !props.research.role || props.research.role === 'owner')
 const showChips = computed(() => showTeam.value || isViewer.value)
 
-const emit = defineEmits<{ tagClick: [tag: string]; statusChanged: [] }>()
+const emit = defineEmits<{ tagClick: [tag: string]; statusChanged: []; delete: [] }>()
 
 const { authFetch } = useAuth()
 const config = useRuntimeConfig()
 const base = config.public.apiBase || ''
+const toasts = useToasts()
 
 async function toggleArchive() {
   const newStatus = props.research.status === 'archived' ? 'active' : 'archived'
-  await authFetch(`${base}/api/researches/${props.research.id}`, {
-    method: 'PUT',
-    body: { status: newStatus },
-  })
-  emit('statusChanged')
+  try {
+    await authFetch(`${base}/api/researches/${props.research.id}`, {
+      method: 'PUT',
+      body: { status: newStatus },
+    })
+    emit('statusChanged')
+  } catch (e: any) {
+    // This used to have no catch at all, and `@click.prevent.stop` kills the
+    // navigation too — so a refusal gave the reader nothing whatsoever: no
+    // toast, no state change, no page move.
+    toasts.error(e?.data?.error ?? 'The server refused it.', 'Could not archive project')
+  }
 }
 </script>
 

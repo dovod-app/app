@@ -71,6 +71,19 @@
           </EditableField>
         </div>
       </div>
+
+      <!-- Owner only, and absent rather than disabled: TeamViewerNotice at the
+           top of the page already explains missing controls once. -->
+      <DangerZone v-if="canAdmin" lead="Deleting a project cannot be undone.">
+        <DangerRow
+          label="Delete project"
+          :note="deleteNote"
+          action-label="Delete"
+          busy-label="Deleting…"
+          :busy="del.busy.value"
+          @action="openDelete"
+        />
+      </DangerZone>
     </div>
 
     <!-- Skills -->
@@ -172,6 +185,21 @@
   >
     <NuxtLink :to="{ name: 'index' }" class="btn btn-primary">Back to projects</NuxtLink>
   </EmptyState>
+
+  <ResearchDeleteResearchDialog
+    v-if="research"
+    :visible="deleteOpen"
+    :code="research.code"
+    :name="research.name"
+    :summary="del.summary.value"
+    :loading="del.loading.value"
+    :summary-failed="del.summaryFailed.value"
+    :busy="del.busy.value"
+    :failure="del.failure.value"
+    :permanently-refused="del.permanentlyRefused.value"
+    @cancel="deleteOpen = false"
+    @confirm="confirmDelete"
+  />
 </template>
 
 <script setup lang="ts">
@@ -183,8 +211,70 @@ const { data: researchData, pending } = await useApi<any>(`/api/researches/${id}
 const research = computed(() => researchData.value?.data?.research)
 const researchSlug = computed(() => research.value?.code || id)
 
-const { canWrite, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, canAdmin, isViewer, setFromResearch } = useResearchRole()
 watch(research, r => setFromResearch(r), { immediate: true })
+
+/* --- Deleting the project --- */
+const del = useResearchDelete()
+const deleteOpen = ref(false)
+
+/* One sentence, and it omits every zero term. A note that reads "0 sections, 0
+   documents" is worse than no note: it invites the reader to skim past the one
+   number that is not zero. */
+const deleteNote = computed(() => {
+  if (del.summaryFailed.value) {
+    return 'Deletes the project and everything filed under it. This cannot be undone.'
+  }
+  const s = del.summary.value
+  if (!s) return undefined
+  const parts: string[] = []
+  const add = (n: number, one: string, many: string) => {
+    if (n) parts.push(`${n} ${n === 1 ? one : many}`)
+  }
+  add(s.sections, 'section', 'sections')
+  add(s.entries, 'document', 'documents')
+  add(s.sessions, 'session', 'sessions')
+  add(s.questions, 'question', 'questions')
+  add(s.tasks, 'task', 'tasks')
+  if (!parts.length) return 'Nothing has been filed under this project yet. This cannot be undone.'
+  const last = parts.pop()
+  const list = parts.length ? `${parts.join(', ')} and ${last}` : last
+  return `Removes ${list}. This cannot be undone.`
+})
+
+/* The row's sentence needs the counts before anything is clicked, so they are
+   fetched once the project arrives — but only for the person who can act on
+   them. Opening the dialog refetches, because that is the number somebody is
+   about to make a decision on. */
+watch(
+  () => [research.value?.id, canAdmin.value] as const,
+  ([id, admin]) => {
+    if (id && admin) void del.loadSummary(researchSlug.value)
+  },
+  { immediate: true },
+)
+
+function openDelete() {
+  deleteOpen.value = true
+  del.failure.value = null
+  del.permanentlyRefused.value = false
+  void del.loadSummary(researchSlug.value)
+}
+
+async function confirmDelete() {
+  const name = research.value?.name ?? 'The project'
+  const outcome = await del.remove(researchSlug.value)
+  if (outcome === 'failed') return
+  deleteOpen.value = false
+  await router.push({ name: 'index' })
+  if (outcome === 'already-gone') {
+    toasts.push({ variant: 'info', title: 'Already deleted', message: `“${name}” had already been removed.` })
+  } else {
+    // No undo action: there is none, and a toast implying one is the single
+    // worst thing this feature could ship.
+    toasts.push({ variant: 'success', title: 'Project deleted', message: `“${name}” and everything in it has been removed.` })
+  }
+}
 
 /* The tab lives in the query string so a link can point at one, and it is
    replaced rather than pushed: Back should leave the page, not walk the tabs. */
