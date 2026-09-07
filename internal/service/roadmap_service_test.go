@@ -424,3 +424,175 @@ func TestRoadmapService_RemoveNodes(t *testing.T) {
 		}
 	})
 }
+
+// A node id is only meaningful inside the roadmap the caller named. Before this
+// test, RemoveNodes deleted by bare id: write access to any roadmap of one's own
+// reached into every roadmap in the database.
+func TestRoadmapService_RemoveNodesStaysInsideItsRoadmap(t *testing.T) {
+	svc, notifier, db, ctx := setupRoadmapService(t)
+	mine := createTestResearch(t, db)
+	theirs := createTestResearch(t, db)
+
+	myRoadmap, err := svc.Create(ctx, CreateRoadmapRequest{ResearchID: mine.ID, Title: "Mine"})
+	if err != nil {
+		t.Fatalf("create mine: %v", err)
+	}
+	theirRoadmap, err := svc.Create(ctx, CreateRoadmapRequest{ResearchID: theirs.ID, Title: "Theirs"})
+	if err != nil {
+		t.Fatalf("create theirs: %v", err)
+	}
+	theirRoadmap, err = svc.AddNodes(ctx, theirRoadmap.ID, []CreateRoadmapNodeRequest{{Title: "Keep"}}, nil)
+	if err != nil {
+		t.Fatalf("add their node: %v", err)
+	}
+	myRoadmap, err = svc.AddNodes(ctx, myRoadmap.ID, []CreateRoadmapNodeRequest{{Title: "Own"}}, nil)
+	if err != nil {
+		t.Fatalf("add my node: %v", err)
+	}
+	foreign := theirRoadmap.Nodes[0].ID
+	own := myRoadmap.Nodes[0].ID
+	notifier.reset()
+
+	// Naming a foreign node beside one's own must remove neither: the refusal
+	// is decided before anything is deleted, and it reads like a missing node.
+	err = svc.RemoveNodes(ctx, myRoadmap.ID, []string{own, foreign})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for a node outside the roadmap, got %v", err)
+	}
+	if notifier.hasEvent("roadmap.updated") {
+		t.Error("a refused removal must not announce a change")
+	}
+	for name, id := range map[string]string{"foreign": foreign, "own": own} {
+		n, err := storage.NewRoadmapNodeRepository(db).FindByID(ctx, id)
+		if err != nil {
+			t.Fatalf("find %s: %v", name, err)
+		}
+		if n == nil {
+			t.Errorf("%s node was deleted by a refused call", name)
+		}
+	}
+
+	// The same id, asked through its own roadmap, goes away.
+	if err := svc.RemoveNodes(ctx, theirRoadmap.ID, []string{foreign}); err != nil {
+		t.Fatalf("remove through the right roadmap: %v", err)
+	}
+	n, err := storage.NewRoadmapNodeRepository(db).FindByID(ctx, foreign)
+	if err != nil {
+		t.Fatalf("find after delete: %v", err)
+	}
+	if n != nil {
+		t.Error("node still present after removal through its own roadmap")
+	}
+}
+
+// Edges and parent links take node ids from the caller. Each may name only a
+// temp_id of the same request or a node of the same roadmap; a request that
+// reaches outside creates nothing.
+func TestRoadmapService_NodeRefsStayInsideTheRoadmap(t *testing.T) {
+	svc, _, db, ctx := setupRoadmapService(t)
+	nodeRepo := storage.NewRoadmapNodeRepository(db)
+	mine := createTestResearch(t, db)
+	theirs := createTestResearch(t, db)
+
+	theirRoadmap, err := svc.Create(ctx, CreateRoadmapRequest{ResearchID: theirs.ID, Title: "Theirs",
+		Nodes: []CreateRoadmapNodeRequest{{TempID: "a", Title: "A"}}})
+	if err != nil {
+		t.Fatalf("create theirs: %v", err)
+	}
+	foreign := theirRoadmap.Nodes[0].ID
+
+	myRoadmap, err := svc.Create(ctx, CreateRoadmapRequest{ResearchID: mine.ID, Title: "Mine",
+		Nodes: []CreateRoadmapNodeRequest{{TempID: "m", Title: "M"}}})
+	if err != nil {
+		t.Fatalf("create mine: %v", err)
+	}
+	own := myRoadmap.Nodes[0].ID
+
+	countNodes := func() int {
+		nodes, err := nodeRepo.FindByRoadmap(ctx, myRoadmap.ID)
+		if err != nil {
+			t.Fatalf("list nodes: %v", err)
+		}
+		return len(nodes)
+	}
+
+	t.Run("edge to a node of another roadmap creates nothing", func(t *testing.T) {
+		before := countNodes()
+		_, err := svc.AddNodes(ctx, myRoadmap.ID,
+			[]CreateRoadmapNodeRequest{{TempID: "x", Title: "X"}},
+			[]CreateRoadmapEdgeRequest{{SourceNodeRef: "x", TargetNodeRef: foreign}})
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+		if countNodes() != before {
+			t.Error("a refused request must not leave its nodes behind")
+		}
+	})
+
+	t.Run("parent in another roadmap is refused on add", func(t *testing.T) {
+		_, err := svc.AddNodes(ctx, myRoadmap.ID,
+			[]CreateRoadmapNodeRequest{{Title: "Child", ParentID: foreign}}, nil)
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+	})
+
+	t.Run("parent in another roadmap is refused on update", func(t *testing.T) {
+		_, err := svc.UpdateNode(ctx, own, UpdateRoadmapNodeRequest{ParentID: ptr(foreign)})
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("expected ErrNotFound, got %v", err)
+		}
+		n, _ := nodeRepo.FindByID(ctx, own)
+		if n.ParentID != "" {
+			t.Errorf("parent was stored despite the refusal: %q", n.ParentID)
+		}
+	})
+
+	t.Run("a node cannot be its own parent", func(t *testing.T) {
+		_, err := svc.UpdateNode(ctx, own, UpdateRoadmapNodeRequest{ParentID: ptr(own)})
+		if !errors.Is(err, ErrValidation) {
+			t.Fatalf("expected ErrValidation, got %v", err)
+		}
+	})
+
+	t.Run("a parent temp_id resolves even when declared after the child", func(t *testing.T) {
+		rm, err := svc.Create(ctx, CreateRoadmapRequest{ResearchID: mine.ID, Title: "Nested",
+			Nodes: []CreateRoadmapNodeRequest{
+				{TempID: "child", Title: "Child", ParentID: "root"},
+				{TempID: "root", Title: "Root"},
+			}})
+		if err != nil {
+			t.Fatalf("create nested: %v", err)
+		}
+		var rootID, childParent string
+		for _, n := range rm.Nodes {
+			switch n.Title {
+			case "Root":
+				rootID = n.ID
+			case "Child":
+				childParent = n.ParentID
+			}
+		}
+		if rootID == "" || childParent != rootID {
+			t.Errorf("child parent = %q, want the root's id %q", childParent, rootID)
+		}
+		stored, _ := nodeRepo.FindByRoadmap(ctx, rm.ID)
+		for _, n := range stored {
+			if n.Title == "Child" && n.ParentID != rootID {
+				t.Errorf("stored child parent = %q, want %q", n.ParentID, rootID)
+			}
+		}
+	})
+
+	t.Run("an existing node of the same roadmap is a valid parent and edge end", func(t *testing.T) {
+		rm, err := svc.AddNodes(ctx, myRoadmap.ID,
+			[]CreateRoadmapNodeRequest{{TempID: "y", Title: "Y", ParentID: own}},
+			[]CreateRoadmapEdgeRequest{{SourceNodeRef: own, TargetNodeRef: "y"}})
+		if err != nil {
+			t.Fatalf("add inside the roadmap: %v", err)
+		}
+		if len(rm.Edges) != 1 || rm.Edges[0].SourceNodeID != own {
+			t.Errorf("edge not stored against the real node: %+v", rm.Edges)
+		}
+	})
+}

@@ -10,7 +10,7 @@ import (
 
 type RoadmapRemoveNodesInput struct {
 	RoadmapID string   `json:"roadmap_id" jsonschema:"ID of the roadmap"`
-	NodeIDs   []string `json:"node_ids" jsonschema:"Array of node IDs to remove. Connected edges are deleted automatically."`
+	NodeIDs   []string `json:"node_ids" jsonschema:"Array of node IDs to remove; each must belong to this roadmap, otherwise nothing is removed. Connected edges are deleted automatically."`
 }
 
 func RegisterRoadmapRemoveNodes(srv *mcp.Server, svc *service.RoadmapService, log *slog.Logger) {
