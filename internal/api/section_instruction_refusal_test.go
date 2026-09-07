@@ -21,6 +21,9 @@ func TestSectionInstruction_RefusalIsAFieldError(t *testing.T) {
 	body := `{"instruction":"` + strings.Repeat("я", 501) + `"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/sections/"+s.sectionID, strings.NewReader(body))
+	// A local caller: the fixture runs with no credential configured, where
+	// only a loopback request may write.
+	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Content-Type", "application/json")
 	s.mux.ServeHTTP(rec, req)
 
