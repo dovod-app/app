@@ -137,8 +137,25 @@ export const metadataCyrillic: Record<string, unknown> = {
 }
 
 /**
- * The section itself, shaped as the research payload delivers it — `field_spec`
- * and `spec_version` beside the ordinary section fields.
+ * The shape a section instruction is supposed to have: three to six
+ * imperatives, naming the section's own declared fields.
+ *
+ * Not invented — this is the convention the eighteen hand-written SPEC
+ * preambles in R21 were all groping towards, written once above the documents
+ * instead of eighteen times inside them.
+ */
+export const mockSectionInstruction =
+  'Назови производящий сервис в поле service.\n' +
+  'Назови потребителя в поле consumer.\n' +
+  'Один абзац обоснования, затем полезная нагрузка.\n' +
+  'Заполни owner и status до сохранения.'
+
+/**
+ * The section itself, shaped as the research payload delivers it — `field_spec`,
+ * `spec_version` and `instruction` beside the ordinary section fields.
+ *
+ * It carries an instruction, so every story that hands this to `EntriesView`
+ * shows the read block above the documents as well as the field chips.
  */
 export const mockSpecSection = {
   id: 'sec_spec',
@@ -150,9 +167,11 @@ export const mockSpecSection = {
   entries_count: 6,
   field_spec: specSpecifications,
   spec_version: 4,
+  instruction: mockSectionInstruction,
 }
 
-/** A section that declares nothing: a topic, not a class of document. */
+/** A section that declares nothing and says nothing about how to write in it:
+ *  a topic, not a class of document — which is most sections. */
 export const mockTopicSection = {
   id: 'sec_questions',
   code: 'S11',
@@ -163,6 +182,7 @@ export const mockTopicSection = {
   entries_count: 8,
   field_spec: [],
   spec_version: 0,
+  instruction: '',
 }
 
 /**
@@ -246,6 +266,7 @@ export const fieldCaps = {
   help_max: 200,
   key_max: 32,
   key_pattern: '^[a-z][a-z0-9_]*$',
+  instruction_max: 500,
 }
 
 export const fieldTypes = [

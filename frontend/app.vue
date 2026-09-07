@@ -40,7 +40,12 @@ const {
 useKeyboardNav()
 
 const { user, isAuthenticated, authEnabled, logout } = useAuth()
-const { version } = useServerInfo()
+const { version, writeApi } = useServerInfo()
+
+// Same sentence TeamViewerNotice gives for its `remote` reason. The nav badge
+// is the only explanation on pages that are not research-scoped.
+const readOnlyExplanation =
+  'This server does not accept changes from a browser. Turn on accounts with auth_enabled to sign in and edit here, or make changes through a tool holding the api_token.'
 
 const route = useRoute()
 // Pages that render without nav or footer. The invitation page joins them
@@ -168,7 +173,19 @@ onUnmounted(() => {
                   </div>
                 </div>
               </template>
-              <span v-else-if="!authEnabled" class="readonly-badge">Read-only</span>
+              <!--
+                Only when the server will actually refuse a write. This badge
+                used to appear whenever accounts were off, including on a local
+                run where every edit control beside it worked — a label that
+                contradicted the buttons under it. Now it says what /api/health
+                says about this caller, and it says why: the word on its own is
+                the one thing a reader cannot act on, and a screen reader gets
+                nothing else anywhere on the page.
+              -->
+              <span v-else-if="!authEnabled && !writeApi" class="readonly-badge" :title="readOnlyExplanation">
+                Read-only
+                <span class="sr-only">. {{ readOnlyExplanation }}</span>
+              </span>
             </div>
           </div>
         </nav>

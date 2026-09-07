@@ -185,7 +185,7 @@ Use `roadmap_update_node` to change node statuses as the user progresses through
 
 ### Step 4: Prune
 
-Use `roadmap_remove_nodes` to remove nodes that are no longer relevant. Edges connected to removed nodes are deleted automatically.
+Use `roadmap_remove_nodes` to remove nodes that are no longer relevant. Edges connected to removed nodes are deleted automatically. Every id must belong to the roadmap you name: an id from another roadmap reads as `not found`, and in that case nothing in the list is removed. The same rule holds for every node reference you write — an edge's `source` and `target` and a node's `parent_id` may name a `temp_id` of the same request or a node already in that roadmap, and a request that names anything else creates nothing.
 
 ## Best Practices
 

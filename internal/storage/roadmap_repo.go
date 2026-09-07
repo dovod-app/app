@@ -324,10 +324,23 @@ func (r *RoadmapNodeRepository) FindByRoadmap(ctx context.Context, roadmapID str
 	return result, rows.Err()
 }
 
-// Delete removes a node (cascade deletes edges).
-func (r *RoadmapNodeRepository) Delete(ctx context.Context, id string) error {
-	_, err := r.db.NewDelete().Table("roadmap_nodes").Where("id=?", id).Exec(ctx)
-	return err
+// DeleteFromRoadmap removes a node that belongs to the given roadmap (cascade
+// deletes edges). It reports whether a row went away.
+//
+// The roadmap is part of the predicate on purpose: the caller has proved write
+// access to one roadmap, and a bare node id would let that grant reach into a
+// roadmap — and a research — the caller never qualified for.
+func (r *RoadmapNodeRepository) DeleteFromRoadmap(ctx context.Context, roadmapID, id string) (bool, error) {
+	res, err := r.db.NewDelete().Table("roadmap_nodes").
+		Where("id=?", id).Where("roadmap_id=?", roadmapID).Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 func (r *RoadmapNodeRepository) scanNode(row scanner) (*domain.RoadmapNode, error) {

@@ -16,7 +16,7 @@ type RoadmapCreateNode struct {
 	Status      *string  `json:"status" jsonschema:"Initial status from the roadmap's statuses list"`
 	PositionX   *float64 `json:"position_x" jsonschema:"X position for layout"`
 	PositionY   *float64 `json:"position_y" jsonschema:"Y position for layout"`
-	ParentID    *string  `json:"parent_id" jsonschema:"Parent node temp_id for hierarchical nesting"`
+	ParentID    *string  `json:"parent_id" jsonschema:"Parent node for hierarchical nesting: a temp_id from this request or the ID of a node already in this roadmap"`
 	RefType     *string  `json:"ref_type" jsonschema:"Reference type linking to a research entity: entry, task, session, research, question. Leave empty for standalone nodes"`
 	RefID       *string  `json:"ref_id" jsonschema:"ID of the referenced entity (entry ID, task ID, etc.)"`
 	Metadata    *string  `json:"metadata" jsonschema:"JSON string with node-type-specific data (e.g. checklist items, URL for link nodes, metric value)"`
@@ -26,8 +26,8 @@ type RoadmapCreateNode struct {
 }
 
 type RoadmapCreateEdge struct {
-	SourceNodeRef string  `json:"source" jsonschema:"Source node temp_id or real node ID"`
-	TargetNodeRef string  `json:"target" jsonschema:"Target node temp_id or real node ID"`
+	SourceNodeRef string  `json:"source" jsonschema:"Source node: a temp_id from this request or the ID of a node in this roadmap"`
+	TargetNodeRef string  `json:"target" jsonschema:"Target node: a temp_id from this request or the ID of a node in this roadmap"`
 	Label         *string `json:"label" jsonschema:"Edge label (e.g. 'next', 'if yes', 'alternative')"`
 	EdgeType      *string `json:"edge_type" jsonschema:"Edge type: default, success, warning, optional. Default: default"`
 }

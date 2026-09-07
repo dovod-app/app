@@ -25,7 +25,7 @@ type EntryCreateInput struct {
 func RegisterEntryCreate(srv *mcp.Server, svc *service.EntryService, log *slog.Logger) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "entry_create",
-		Description: "Creates a new entry within a section. Title and description are auto-generated from content if not provided. Returns entry_id and auto-generated fields.",
+		Description: "Creates a new entry within a section. Follow the section's instruction if it has one — you will usually already have it from research_get, and most sections carry none. It says what a document in this particular section looks like, and it wins over the research memory and any skill on that question only. Title and description are auto-generated from content if not provided. Returns entry_id and auto-generated fields.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input EntryCreateInput) (*mcp.CallToolResult, any, error) {
 		var errs []string
 		if input.ResearchID == "" {

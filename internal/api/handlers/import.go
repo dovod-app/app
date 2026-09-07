@@ -25,17 +25,23 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	research, err := h.export.Import(r.Context(), &data, r.URL.Query().Get("team"))
+	research, warnings, err := h.export.Import(r.Context(), &data, r.URL.Query().Get("team"))
 	if err != nil {
 		h.log.Error("import failed", "error", err)
 		writeServiceError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	out := map[string]any{
 		"status":      "imported",
 		"research_id": research.ID,
 		"code":        research.Code,
 		"name":        research.Name,
-	})
+	}
+	// What the file carried and the import could not. Omitted when there is
+	// nothing to say, so a clean import stays a clean payload.
+	if len(warnings) > 0 {
+		out["warnings"] = warnings
+	}
+	writeJSON(w, http.StatusCreated, out)
 }

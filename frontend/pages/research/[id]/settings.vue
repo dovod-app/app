@@ -15,7 +15,7 @@
       title="Settings"
     >
       <template #actions>
-        <TeamViewerNotice v-if="isViewer" :team-name="research?.team_name" />
+        <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="research?.team_name" />
       </template>
     </PageHeader>
 
@@ -146,9 +146,10 @@
     <!-- Sections -->
     <div v-else-if="activeTab === 'sections'" id="panel-sections" role="tabpanel" aria-labelledby="tab-sections" tabindex="0" class="panel">
       <p class="lead">
-        A section can declare what its documents record. The vocabulary is closed: an agent
-        may write the keys named here and nothing else, and a section that declares nothing
-        accepts no metadata at all.
+        A section can say how to write in it, and declare what its documents record. The
+        instruction is read before every document written here; the field vocabulary is closed
+        &mdash; an agent may write the keys named here and nothing else, and a section that
+        declares nothing accepts no metadata at all.
       </p>
       <ResearchSettingsFieldSpecList
         :sections="sections"
@@ -157,6 +158,7 @@
         :types="fieldTypes"
         :reserved-keys="reservedKeys"
         :on-save="saveFieldSpec"
+        :on-save-instruction="saveInstruction"
       />
     </div>
 
@@ -188,7 +190,7 @@ const { data: researchData, pending } = await useApi<any>(`/api/researches/${id}
 const research = computed(() => researchData.value?.data?.research)
 const researchSlug = computed(() => research.value?.code || id)
 
-const { canWrite, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, readOnlyReason, setFromResearch } = useResearchRole()
 watch(research, r => setFromResearch(r), { immediate: true })
 
 /* The tab lives in the query string so a link can point at one, and it is
@@ -263,8 +265,8 @@ const tabs = computed(() => [
   {
     id: 'sections',
     label: 'Sections',
-    count: declaredSections.value,
-    srCount: `${declaredSections.value} sections declare fields`,
+    count: configuredSections.value,
+    srCount: `${configuredSections.value} sections say how to write in them or declare fields`,
   },
   {
     id: 'memory',
@@ -276,14 +278,19 @@ const tabs = computed(() => [
 
 // --- Section field specs ---
 const sections = computed<any[]>(() => researchData.value?.data?.sections ?? [])
-const declaredSections = computed(() => sections.value.filter(s => (s.field_spec?.length ?? 0) > 0).length)
+// What the tab badge counts. It used to count only sections declaring fields,
+// which on a project that declares none — the normal case — read as "nothing
+// here" on the one tab where a section's writing instruction is set. A count
+// that says zero over a list of four is worse than no count.
+const configuredSections = computed(() =>
+  sections.value.filter(s => (s.field_spec?.length ?? 0) > 0 || !!s.instruction).length)
 
 // The rules come from the server rather than a copy in here. A cap the client
 // believes and the server enforces will disagree exactly once, at the worst
 // moment, and a reserved-key list hard-coded here drifts the day a twelfth key
 // joins the export.
 const schema = ref<any>(null)
-const fieldCaps = computed(() => schema.value?.caps ?? { fields: 12, required: 5, options: 20 })
+const fieldCaps = computed(() => schema.value?.caps ?? { fields: 12, required: 5, options: 20, instruction_max: 500 })
 // A fallback that keeps the editor usable, not an empty list: without it a
 // failed schema fetch rendered the type <select> with zero options, so the one
 // control the editor cannot do without stopped working — while the comment on
@@ -312,6 +319,16 @@ async function saveFieldSpec(sectionId: string, spec: any[]) {
   await authFetch(`${base}/api/sections/${sectionId}`, {
     method: 'PUT',
     body: { field_spec: spec },
+  })
+  researchData.value = await authFetch<any>(`${base}/api/researches/${id}`)
+}
+
+/* An empty string is a value here, not an omission: it removes the instruction.
+   The server tells the two apart because the field is a pointer. */
+async function saveInstruction(sectionId: string, instruction: string) {
+  await authFetch(`${base}/api/sections/${sectionId}`, {
+    method: 'PUT',
+    body: { instruction },
   })
   researchData.value = await authFetch<any>(`${base}/api/researches/${id}`)
 }

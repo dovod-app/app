@@ -17,7 +17,7 @@
       :lead="filterSummary"
     >
       <template #actions>
-        <TeamViewerNotice v-if="isViewer" :team-name="research?.team_name" />
+        <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="research?.team_name" />
         <button
           v-if="canWrite && answered.length"
           class="btn btn-sm btn-primary"
@@ -88,7 +88,7 @@ const id = route.params.id as string
 const { data: researchData, pending } = await useApi<{ data: any }>(`/api/researches/${id}`)
 const research = computed(() => researchData.value?.data?.research)
 
-const { canWrite, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, readOnlyReason, setFromResearch } = useResearchRole()
 watch(researchData, (d) => setFromResearch(d?.data?.research), { immediate: true })
 
 const researchSlug = computed(() => research.value?.code || id)

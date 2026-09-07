@@ -238,7 +238,7 @@ func main() {
 	// Run MCP server (blocking)
 	switch cfg.Transport {
 	case "sse":
-		if err := srv.RunSSE(ctx, cfg.MCPPort, authSvc, cfg.BaseURL); err != nil {
+		if err := srv.RunSSE(ctx, cfg.MCPPort, authSvc, cfg.APIToken, cfg.BaseURL); err != nil {
 			log.Error("SSE server error", "error", err)
 			os.Exit(1)
 		}

@@ -33,7 +33,11 @@ type specServer struct {
 	router *router
 }
 
-func newSpecServer(t *testing.T) *specServer {
+// newSpecServer builds the whole server the way main.go does. The options are
+// for tests that need a different posture — accounts off, an api_token only, an
+// MCP handler mounted — and the default is the widest route set, which is what
+// the drift guards want.
+func newSpecServer(t *testing.T, opts ...func(*ServerConfig)) *specServer {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db, err := storage.NewDB(testdb.Config(t), log)
@@ -87,8 +91,21 @@ func newSpecServer(t *testing.T) *specServer {
 		Version:  "1.2.3",
 	}
 
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	// main.go only constructs the auth service when accounts are on, so a test
+	// that turns them off has to hand over the same nil — otherwise it is
+	// testing a wiring that cannot happen.
+	wiredAuth := authSvc
+	if !cfg.AuthEnabled {
+		wiredAuth = nil
+		cfg.OAuthSvc = nil
+	}
+
 	srv := NewServer(cfg, researchSvc, sectionSvc, entrySvc, sessionSvc, taskSvc,
-		roadmapSvc, exportSvc, obsidianSvc, teamSvc, shareSvc, skillSvc, templateSvc, annotationSvc, access, authSvc, db,
+		roadmapSvc, exportSvc, obsidianSvc, teamSvc, shareSvc, skillSvc, templateSvc, annotationSvc, access, wiredAuth, db,
 		entryRepo, researchRepo, crossrefRepo, externalLinkRepo, hub, log)
 
 	return &specServer{mux: srv.mux, router: srv.router}
@@ -126,6 +143,7 @@ func TestOpenAPI_EveryRouteIsDocumented(t *testing.T) {
 		"/mcp":                 "the MCP transport, which has its own protocol",
 		"/":                    "the embedded frontend and the MCP catch-all",
 		"/llms/":               "a prefix serving markdown files, enumerated by /llms.txt",
+		"/api/":                "the JSON 404 for any path under /api/ that matched no route",
 		"/api/shared/{token}/": "the visitor sub-mux, described in prose on GET /api/shared/{token}",
 		"/api/shared/{token}":  "the method fallback under the share prefix",
 		"/api/openapi.yaml":    "documented",

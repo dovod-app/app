@@ -10,10 +10,20 @@ db_driver: sqlite      # sqlite (default), postgres, or mysql
 # db_dsn overrides db for SQLite as well.
 log_level: info
 
-# The operator credential. Enables the write REST API, and it is the only way to
-# add a kickoff methodology that every team on this server sees:
+# The operator credential. It is the write credential for a server without
+# accounts — REST writes, the MCP endpoint at /mcp, and the SSE transport all
+# require it as a bearer token once it is set — and it is the only way to add a
+# kickoff methodology that every team on this server sees:
 #   POST /api/templates  -H "Authorization: Bearer <this>"
 # Without it that route answers 403 operator_required on an auth-enabled server.
+#
+# With neither api_token nor auth_enabled, this server takes writes only from
+# the machine it runs on: a request over the network, or through a reverse
+# proxy, is refused with 401. Reads stay open to anyone who can reach the port.
+# Set one of the two on anything another machine can reach — including a
+# container, whose published port is not the server's own loopback address.
+# A browser cannot present an api_token, so use auth_enabled where people work
+# in the web interface.
 # api_token: "a-long-random-string"
 
 # Authentication

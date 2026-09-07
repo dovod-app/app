@@ -146,6 +146,38 @@ looked up before what it merely could attach. Only when a slug is attached to
 nothing here does the wider scope (this research's private skills, its team's
 library, the built-ins) answer, highest tier first.
 
+## Three places a rule can live
+
+A skill is not the only surface that tells the agent how to work. There are
+three, and which one a rule belongs in is decided by its scope:
+
+> **The research's memory says what *this research* is. A skill says how a
+> *kind of work* is done. A section's `instruction` says how to write *in that
+> section*.**
+
+Most specific wins on a direct conflict, so a section instruction beats both on
+the question of what a document filed there looks like — and it may not
+legislate beyond that. An instruction that restates research-wide tone or
+methodology is misfiled: it belongs in the memory or in a skill, where every
+section gets it once instead of each one repeating it.
+
+A section instruction is at most 500 characters — counted in runes, like a
+skill's description, so a Cyrillic instruction is not worth half a Latin one —
+and reads as three to six imperatives: "Name the producing service. State the
+consumer. One paragraph of rationale, then the payload." Anything longer is
+summarised and diluted by the reader it was written for, which is why a longer
+one is refused rather than truncated. Where the section also declares [typed
+fields](/llms/metadata.md), the instruction should name those fields by key, or
+the two drift into disagreeing about the same document.
+
+`section_list` and `research_get` both carry it, on the sections that have one,
+so it costs no extra call: read it before writing a document into that section.
+Write it with `section_update` (or `PUT /api/sections/{sectionId}`). Sending
+`null` leaves the stored one alone — over MCP that is the only way to say so,
+because the tool schema requires every property — and `""` removes it. Over
+REST, omitting the key does the same as `null`. A share visitor never sees one —
+how a team writes is working process, like the memory.
+
 ## Product skills are not counted
 
 Some built-ins describe the product rather than a domain — how to manage a
@@ -256,7 +288,9 @@ changed: the research for the `/api/researches/{id}/skills…` routes, the team 
 `/api/teams/{id}/skills` and for forking or promoting into a library, and — for
 the by-id routes — whichever of the two the skill belongs to. A `viewer` gets
 `403`, a non-member `404`. With `auth_enabled: false` there is nobody to check
-and every route is permitted.
+and every route is permitted — to a caller the server accepts a write from at
+all: with no `api_token` configured either, that is one on the server's own
+machine and nobody else.
 
 Conflicts carry a `code` so a client can tell them apart without matching on
 prose:

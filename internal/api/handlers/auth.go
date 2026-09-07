@@ -196,7 +196,26 @@ func (h *AuthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 		"auth_enabled":       true,
 		"allow_registration": h.authSvc.AllowRegistration(),
 	}
-	if h.autoLoginToken != "" {
+	// The auto-login token is a 30-day JWT for the `default_user`, and this is a
+	// public route. Handing it to anyone who asks made an instance configured
+	// for local convenience give a stranger that account — reads, writes, and
+	// `/api/auth/api-keys` to mint a credential outliving the JWT — for a month,
+	// revocable only by rotating `jwt_secret`.
+	//
+	// It exists so a browser on the operator's own machine logs in without a
+	// password, so that is the only caller it is served to. The predicate is the
+	// one the write gate uses; a second reading of "is this local" is how the
+	// two drift apart.
+	//
+	// Known limit, tracked in #118: an L4 forwarder on the same host (nginx
+	// `stream {}`, HAProxy in TCP mode, `ssh -L`) adds no header and leaves the
+	// peer address loopback, so a remote caller who also controls the Host
+	// header satisfies auth.LocalRequest. On this route that yields the
+	// default_user's 30-day JWT, not merely an anonymous write — which makes it
+	// the sharpest consequence of that gap. Binding the listener to loopback
+	// when no credential is configured is the fix; it is a deployment-visible
+	// decision and has its own issue.
+	if h.autoLoginToken != "" && auth.LocalRequest(r) {
 		resp["auto_login_token"] = h.autoLoginToken
 	}
 	writeJSON(w, http.StatusOK, resp)

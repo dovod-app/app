@@ -17,7 +17,7 @@
       lead="Documents created or revised since you last opened them."
     >
       <template #actions>
-        <TeamViewerNotice v-if="isViewer" :team-name="research?.team_name" />
+        <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="research?.team_name" />
         <button
           v-if="updates.count"
           type="button"
@@ -80,7 +80,7 @@ const research = computed(() => researchData.value?.data?.research)
 const sections = computed<any[]>(() => researchData.value?.data?.sections ?? [])
 const researchSlug = computed(() => research.value?.code || id)
 
-const { isViewer, setFromResearch } = useResearchRole()
+const { readOnlyReason, setFromResearch } = useResearchRole()
 watch(research, (value) => setFromResearch(value), { immediate: true })
 
 const {

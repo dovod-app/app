@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/dovod-app/app/internal/auth"
 	"github.com/dovod-app/app/internal/domain"
@@ -27,6 +29,15 @@ type CreateSectionRequest struct {
 	DisplayName string
 	Description string
 	Position    int
+	// Instruction says how to write a document in this section. Carried on
+	// creation for the same reason FieldSpec is: without it an exported
+	// research comes back with its writing conventions dropped, and the next
+	// eighteen documents are again written from scratch.
+	//
+	// It is not exposed on any create-a-section surface a person or an agent
+	// drives — section_update and PUT /api/sections/{id} are where an
+	// instruction is written. This field exists so a round-trip keeps one.
+	Instruction string
 	// FieldSpec declares what documents in this section record. Almost always
 	// empty — most sections are topics, not document classes — and carried here
 	// so an imported research arrives with the declaration its documents were
@@ -87,6 +98,9 @@ func (s *ResearchService) Create(ctx context.Context, req CreateResearchRequest)
 
 	var sections []*domain.Section
 	for _, sec := range req.Sections {
+		// The drop is reported by the importer, which is the only caller that
+		// can name the file it came from; here it is the last guard.
+		instruction, _ := validInstruction(sec.Instruction)
 		section := &domain.Section{
 			ID:          uuid.New().String(),
 			ResearchID:  research.ID,
@@ -95,6 +109,7 @@ func (s *ResearchService) Create(ctx context.Context, req CreateResearchRequest)
 			Description: normalizeContent(sec.Description),
 			Status:      domain.SectionDraft,
 			Position:    sec.Position,
+			Instruction: instruction,
 			FieldSpec:   validFieldSpec(sec.FieldSpec),
 			SpecVersion: specVersionFor(sec.FieldSpec),
 		}
@@ -346,6 +361,7 @@ func (s *ResearchService) AddSection(ctx context.Context, researchID string, req
 		return nil, ErrDuplicateSectionName
 	}
 
+	instruction, _ := validInstruction(req.Instruction)
 	section := &domain.Section{
 		ID:          uuid.New().String(),
 		ResearchID:  researchID,
@@ -354,6 +370,7 @@ func (s *ResearchService) AddSection(ctx context.Context, researchID string, req
 		Description: normalizeContent(req.Description),
 		Status:      domain.SectionDraft,
 		Position:    req.Position,
+		Instruction: instruction,
 		FieldSpec:   validFieldSpec(req.FieldSpec),
 		SpecVersion: specVersionFor(req.FieldSpec),
 	}
@@ -383,6 +400,34 @@ func validFieldSpec(specs []domain.FieldSpec) []domain.FieldSpec {
 		return nil
 	}
 	return specs
+}
+
+// validInstruction is validFieldSpec's rule applied to the section's
+// instruction: creation is the one path that takes one from somewhere else — an
+// import, or a restore of a file somebody edited — and refusing the whole
+// research over a note that runs forty characters long would be the wrong
+// trade. section_update refuses instead, because there a person is looking at
+// the text and can shorten it.
+//
+// Dropped rather than truncated, on every path. A truncated instruction is the
+// worse outcome: it reads as a complete rule whose second half happens to be
+// missing, and the agent re-reading it on every write cannot tell. An absent
+// one is at least honestly absent — and `ok` is false so the caller can say so
+// out loud instead of leaving a silently empty field.
+func validInstruction(s string) (value string, ok bool) {
+	s = strings.TrimSpace(normalizeContent(s))
+	if utf8.RuneCountInString(s) > domain.SectionInstructionMax {
+		return "", false
+	}
+	return s, true
+}
+
+// InstructionTooLong reports whether an instruction taken from a file would be
+// dropped on import. It exists so the importer can warn about the loss rather
+// than let the section arrive quietly without its convention.
+func InstructionTooLong(s string) bool {
+	_, ok := validInstruction(s)
+	return !ok
 }
 
 func specVersionFor(specs []domain.FieldSpec) int {

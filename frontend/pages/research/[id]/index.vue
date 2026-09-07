@@ -19,7 +19,7 @@
       <template #actions>
         <StatusBadge :status="research.status" />
           <TeamChip v-if="showTeamChip" :name="research.team_name" />
-          <TeamViewerNotice v-if="isViewer" :team-name="research.team_name" />
+          <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="research.team_name" />
 
           <!-- Icon nav buttons -->
           <NuxtLink v-if="entryUpdates.count > 0" :to="updatesPath(researchSlug)" class="btn btn-icon" title="New and changed documents" :aria-label="`${entryUpdates.count} new or changed documents`">
@@ -274,7 +274,7 @@ const research = computed(() => researchData.value?.data?.research)
 // The role rides on the payload every research page already awaits, so no
 // screen ever renders edit controls and then takes them away.
 const { authEnabled } = useAuth()
-const { canWrite, canAdmin, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, canAdmin, readOnlyReason, setFromResearch } = useResearchRole()
 watch(research, (r) => setFromResearch(r), { immediate: true })
 
 const showTeamChip = computed(() => !!research.value?.team_name && !research.value?.team_is_personal)

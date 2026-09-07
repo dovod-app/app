@@ -190,6 +190,7 @@ func (s *ExportService) Export(ctx context.Context, researchID string) (*domain.
 			Description: sec.Description,
 			Status:      sec.Status,
 			Position:    sec.Position,
+			Instruction: sec.Instruction,
 			FieldSpec:   sec.FieldSpec,
 			CreatedAt:   sec.CreatedAt,
 			UpdatedAt:   sec.UpdatedAt,
@@ -267,18 +268,25 @@ func (s *ExportService) Export(ctx context.Context, researchID string) (*domain.
 // Returns the newly created research.
 // Import rebuilds a research from an export file, in the caller's personal
 // team unless teamID names another one they may write to.
-func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, teamID string) (*domain.Research, error) {
+func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, teamID string) (*domain.Research, []string, error) {
+	// What the file carried and this import could not. Not an error: an
+	// import that refuses a whole research over one over-long note would be
+	// the wrong trade. But a section that arrives without the convention its
+	// documents were written under has to say so — nobody reads a silently
+	// empty field.
+	var warnings []string
+
 	if data.Version != 1 && data.Version != 2 {
-		return nil, fmt.Errorf("unsupported export version: %d", data.Version)
+		return nil, warnings, fmt.Errorf("unsupported export version: %d", data.Version)
 	}
 
 	r := data.Research
 
 	if err := validateImportEntries(r); err != nil {
-		return nil, err
+		return nil, warnings, err
 	}
 	if err := validateImportProcess(r); err != nil {
-		return nil, err
+		return nil, warnings, err
 	}
 
 	// Every entry this creates gets revision 1 attributed to the import rather
@@ -289,11 +297,20 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 	// 1. Create research with sections
 	sectionReqs := make([]CreateSectionRequest, len(r.Sections))
 	for i, sec := range r.Sections {
+		// Dropped, never truncated — a half-instruction reads as a whole one.
+		// Said out loud here rather than in the service, because this is the
+		// only layer that knows the text came out of a file somebody can fix.
+		if InstructionTooLong(sec.Instruction) {
+			warnings = append(warnings, fmt.Sprintf(
+				"section %q: its writing instruction is %d characters, over the %d-character limit, so the section was imported without one — shorten it in the file and set it with section_update",
+				sec.Name, len([]rune(strings.TrimSpace(sec.Instruction))), domain.SectionInstructionMax))
+		}
 		sectionReqs[i] = CreateSectionRequest{
 			Name:        sec.Name,
 			DisplayName: sec.DisplayName,
 			Description: sec.Description,
 			Position:    sec.Position,
+			Instruction: sec.Instruction,
 			FieldSpec:   sec.FieldSpec,
 		}
 	}
@@ -307,7 +324,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 		Sections:    sectionReqs,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create research: %w", err)
+		return nil, warnings, fmt.Errorf("create research: %w", err)
 	}
 
 	// Update research fields that Create doesn't set
@@ -317,7 +334,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 			updateReq.Status = &r.Status
 		}
 		if _, err := s.research.Update(ctx, research.ID, updateReq); err != nil {
-			return nil, fmt.Errorf("update research fields: %w", err)
+			return nil, warnings, fmt.Errorf("update research fields: %w", err)
 		}
 	}
 
@@ -352,7 +369,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 			Questions:  questions,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("create session %q: %w", sess.Title, err)
+			return nil, warnings, fmt.Errorf("create session %q: %w", sess.Title, err)
 		}
 		sessionCodeToID[sess.Code] = session.ID
 
@@ -386,7 +403,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 		}
 	}
 	if err := s.research.researches.ImportProcess(ctx, research.ID, r.Instruction, memory, r.PrivateSkills); err != nil {
-		return nil, fmt.Errorf("import research memory and private skills: %w", err)
+		return nil, warnings, fmt.Errorf("import research memory and private skills: %w", err)
 	}
 
 	// 3. Create entries (ordered by section position to preserve code order)
@@ -411,7 +428,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 				Metadata:    e.Metadata,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("create entry %q: %w", e.Title, err)
+				return nil, warnings, fmt.Errorf("create entry %q: %w", e.Title, err)
 			}
 			// After the document, because a mark needs the entry it marks. A
 			// failure here is logged and skipped rather than failing the import:
@@ -429,7 +446,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 			Priority:    t.Priority,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("create task %q: %w", t.Title, err)
+			return nil, warnings, fmt.Errorf("create task %q: %w", t.Title, err)
 		}
 
 		// Update status/result if not default
@@ -458,7 +475,7 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 			Nodes:       nodeReqs,
 			Edges:       edgeReqs,
 		}); err != nil {
-			return nil, fmt.Errorf("create roadmap %q: %w", rm.Title, err)
+			return nil, warnings, fmt.Errorf("create roadmap %q: %w", rm.Title, err)
 		}
 	}
 
@@ -468,7 +485,8 @@ func (s *ExportService) Import(ctx context.Context, data *domain.ExportData, tea
 	}
 
 	// Re-read research to get final state
-	return s.research.Get(ctx, research.ID)
+	out, err := s.research.Get(ctx, research.ID)
+	return out, warnings, err
 }
 
 // validateImportEntries rejects entries EntryService.Create would refuse, before

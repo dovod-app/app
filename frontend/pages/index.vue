@@ -6,7 +6,14 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           Methodologies
         </NuxtLink>
-        <button class="btn btn-sm" @click="triggerImport" :disabled="importing">
+        <!--
+          Hidden when the server will refuse the write. useResearchRole is
+          scoped to one research and there is none here, so this page had no
+          write gate at all — invisible while auth-off meant "everything is
+          permitted", and an invitation to a permanent error toast once it
+          stopped meaning that.
+        -->
+        <button v-if="canWriteHere" class="btn btn-sm" @click="triggerImport" :disabled="importing">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="12" x2="12" y2="18"/><polyline points="9 15 12 12 15 15"/></svg>
             {{ importing ? 'Importing...' : 'Import JSON' }}
           </button>
@@ -151,10 +158,22 @@ async function handleImportFile(event: Event) {
   try {
     const text = await file.text()
     const data = JSON.parse(text)
-    const result = await authFetch<{ research_id: string; code: string; name: string }>(
+    const result = await authFetch<{ research_id: string; code: string; name: string; warnings?: string[] }>(
       `${base}/api/researches/import`,
       { method: 'POST', body: data }
     )
+    // What the file carried and the import could not. A section whose writing
+    // instruction was over the limit arrives without one, and the person who
+    // just imported the file is the only one who can put it back — so the
+    // whole point of dropping rather than truncating is that somebody is told.
+    // Pushed before navigating, because the toast host survives the route
+    // change and the page does not.
+    for (const warning of result.warnings ?? []) {
+      // `info`, not `error`: the research imported and is usable. There is no
+      // `warning` variant, and inventing one for this is a bigger change than
+      // the message deserves.
+      useToasts().push({ variant: 'info', title: 'Imported with a change', message: warning, timeout: 0 })
+    }
     await navigateTo(`/research/${result.code}`)
   } catch (e: any) {
     useToasts().push({ variant: 'error', title: 'Import failed', message: e?.message || String(e), timeout: 0 })
@@ -171,6 +190,14 @@ const apiUrl = computed(() => {
   const query = params.toString()
   return query ? `/api/researches?${query}` : '/api/researches'
 })
+
+// Whether this browser may write anything at all, with no research in hand:
+// signed in when there are accounts, and otherwise whatever /api/health says
+// about this caller.
+const { authEnabled, isAuthenticated } = useAuth()
+const { writeApi } = useServerInfo()
+
+const canWriteHere = computed(() => (authEnabled.value ? isAuthenticated.value : writeApi.value))
 
 const { data, pending, refresh } = useApi<{ data: any[] }>(apiUrl.value)
 

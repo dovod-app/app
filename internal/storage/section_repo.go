@@ -38,6 +38,7 @@ func (r *SectionRepository) Create(ctx context.Context, section *domain.Section)
 		"description":  section.Description,
 		"status":       section.Status,
 		"position":     section.Position,
+		"instruction":  section.Instruction,
 		"field_spec":   marshalJSON(section.FieldSpec),
 		"spec_version": section.SpecVersion,
 		"created_at":   now,
@@ -71,6 +72,7 @@ func (r *SectionRepository) CreateTx(ctx context.Context, tx bun.Tx, section *do
 		"description":  section.Description,
 		"status":       section.Status,
 		"position":     section.Position,
+		"instruction":  section.Instruction,
 		"field_spec":   marshalJSON(section.FieldSpec),
 		"spec_version": section.SpecVersion,
 		"created_at":   now,
@@ -93,6 +95,7 @@ func (r *SectionRepository) Update(ctx context.Context, section *domain.Section)
 		Set("description=?", section.Description).
 		Set("status=?", section.Status).
 		Set("position=?", section.Position).
+		Set("instruction=?", section.Instruction).
 		Set("code=?", section.Code).
 		Set("field_spec=?", marshalJSON(section.FieldSpec)).
 		Set("spec_version=?", section.SpecVersion).
@@ -108,7 +111,7 @@ func (r *SectionRepository) Update(ctx context.Context, section *domain.Section)
 
 func (r *SectionRepository) FindByID(ctx context.Context, id string) (*domain.Section, error) {
 	row := selectRow(ctx, r.db.NewSelect().
-		ColumnExpr("id, code, research_id, name, display_name, description, status, position, field_spec, spec_version, created_at, updated_at").
+		ColumnExpr("id, code, research_id, name, display_name, description, status, position, instruction, field_spec, spec_version, created_at, updated_at").
 		TableExpr("sections").
 		Where("id=?", id))
 	return r.scanSection(row)
@@ -116,7 +119,7 @@ func (r *SectionRepository) FindByID(ctx context.Context, id string) (*domain.Se
 
 func (r *SectionRepository) FindByResearch(ctx context.Context, researchID string) ([]*domain.Section, error) {
 	rows, err := r.db.NewSelect().
-		ColumnExpr("id, code, research_id, name, display_name, description, status, position, field_spec, spec_version, created_at, updated_at").
+		ColumnExpr("id, code, research_id, name, display_name, description, status, position, instruction, field_spec, spec_version, created_at, updated_at").
 		TableExpr("sections").
 		Where("research_id=?", researchID).
 		OrderExpr("position ASC").
@@ -149,7 +152,7 @@ func (r *SectionRepository) CountEntriesBySection(ctx context.Context, sectionID
 
 func (r *SectionRepository) FindByResearchAndName(ctx context.Context, researchID, name string) (*domain.Section, error) {
 	row := selectRow(ctx, r.db.NewSelect().
-		ColumnExpr("id, code, research_id, name, display_name, description, status, position, field_spec, spec_version, created_at, updated_at").
+		ColumnExpr("id, code, research_id, name, display_name, description, status, position, instruction, field_spec, spec_version, created_at, updated_at").
 		TableExpr("sections").
 		Where("research_id=? AND name=?", researchID, name))
 	return r.scanSection(row)
@@ -162,7 +165,7 @@ func (r *SectionRepository) scanSection(row scanner) (*domain.Section, error) {
 	err := row.Scan(
 		&s.ID, &s.Code, &s.ResearchID, &s.Name, &s.DisplayName,
 		&s.Description, &s.Status, &s.Position,
-		&fieldSpec, &s.SpecVersion,
+		&s.Instruction, &fieldSpec, &s.SpecVersion,
 		&createdAt, &updatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -184,7 +187,7 @@ func (r *SectionRepository) scanSectionRow(rows *sql.Rows) (*domain.Section, err
 	err := rows.Scan(
 		&s.ID, &s.Code, &s.ResearchID, &s.Name, &s.DisplayName,
 		&s.Description, &s.Status, &s.Position,
-		&fieldSpec, &s.SpecVersion,
+		&s.Instruction, &fieldSpec, &s.SpecVersion,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {

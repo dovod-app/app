@@ -109,8 +109,8 @@ deferred questions; the marks a person left, split into `to_work` and
 `awaiting_human`; the documents changed most recently; and at most three
 `next_actions`, each with a `reason_code`, a sentence saying what it was derived
 from, and an `actor`. Call it after `research_get` — that one carries the
-constraints (`memory`, `field_spec`, the skills index), this one
-carries the work — and before you start reading documents.
+constraints (`memory`, each section's `instruction` and `field_spec`, the skills
+index), this one carries the work — and before you start reading documents.
 
 Four things about the answer decide whether you use it correctly:
 
@@ -171,6 +171,19 @@ As information accumulates:
 5. Use `[[E1]]` syntax to cross-reference other entries
 6. Each entry gets an auto-assigned short code (E1, E2, ...)
 7. Entries created while a session is active are linked to it automatically, which is what the session export lists as "entries produced in this session"
+
+**Read the section's instruction before you write.** `section_list` (or
+`research_get`) returns `instruction` on a section that has one: three to six
+imperatives saying what a document *here* looks like — "Name the producing
+service. State the consumer. One paragraph of rationale, then the payload."
+Follow it for this document. It is the most specific of the three places a rule
+lives — the research's memory says what this research is, a skill says how a kind
+of work is done, this says how to write in this section — so it wins on a direct
+conflict about the shape of the document, and only about that. Where the section
+declares fields too, the instruction names those keys. Nothing checks that you
+read it; the document you write is the only evidence. Write one with
+`section_update` when a section has grown a convention its documents keep
+repeating in their own words. See [Skills](/llms/skills.md).
 
 **Check whether the section declares fields.** `section_list` (or `research_get`)
 returns `field_spec` on a section that holds one class of document — a

@@ -62,7 +62,7 @@ Legacy MCP Client
     | SSE (:8081)
     |
 Go Process
-    |-- MCP Server (39 tools, 2 prompts)
+    |-- MCP Server (52 tools, 2 prompts)
     |-- REST API (:8088) -- read-only + write (bearer auth)
     |-- WebSocket (:8088/ws) -- real-time event push
     |-- OAuth2 endpoints (/auth/*)
@@ -250,7 +250,7 @@ Priority: CLI flags > env vars > config.yaml > defaults.
 | Web Port | `--web-port` | - | `web_port` | `8088` |
 | DB Path | `--db` | `MCP_RESEARCH_DB` | `db` | (in-memory) |
 | Log Level | `--log-level` | `MCP_RESEARCH_LOG_LEVEL` | `log_level` | `info` |
-| API Token | `--api-token` | `MCP_RESEARCH_API_TOKEN` | `api_token` | (write API disabled) |
+| API Token | `--api-token` | `MCP_RESEARCH_API_TOKEN` | `api_token` | — (writes accepted from the server's own machine only) |
 | Auth Enabled | `--auth-enabled` | `MCP_RESEARCH_AUTH_ENABLED` | `auth_enabled` | `false` |
 | JWT Secret | `--jwt-secret` | `MCP_RESEARCH_JWT_SECRET` | `jwt_secret` | (auto-generated) |
 | Allow Registration | `--allow-registration` | `MCP_RESEARCH_ALLOW_REGISTRATION` | `allow_registration` | `true` |
@@ -308,8 +308,12 @@ and `internal/service/oauth_service_test.go` (expiry, PKCE methods, the race).
 
 ## Write API
 
-When `api_token` is configured, write endpoints are enabled with bearer token authentication.
-All write endpoints require `Authorization: Bearer <token>` header.
+When `api_token` is configured, write endpoints require `Authorization: Bearer <token>`,
+and so do `/mcp`, the `/` catch-all and the SSE transport — the same instance credential
+on every door. When neither `api_token` nor `auth_enabled` is set, a write is accepted
+only from a **local request** (`auth.LocalRequest`: loopback peer, loopback `Host`,
+loopback `Origin` if any, and no forwarding header); a remote caller gets 401.
+`/api/health`'s `write_api` answers for the request that asked, not for the instance.
 Read-only endpoints remain unauthenticated (unless `auth_enabled`).
 
 **Full route list** lives in `internal/api/server.go` (the source of truth) and in

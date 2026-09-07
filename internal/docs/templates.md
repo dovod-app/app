@@ -206,8 +206,9 @@ The credential is the `api_token` from the config, and it is the only one that
 works. Not a role: no role in this product grants it, a team `owner` is refused
 with `operator_required`, and nobody can be promoted into it. With neither
 `api_token` nor `auth_enabled` there is no boundary to prove anything across and
-every caller is treated as the operator, exactly as every other write is in that
-mode.
+every caller **on the server's own machine** is treated as the operator; a
+caller from anywhere else is refused before the route runs, exactly as every
+other write is in that mode.
 
 `source` is what keeps the two apart at boot, and it is load-bearing rather than
 informational. The refresh matches on **slug *and* `source='builtin'`**, so a
@@ -230,7 +231,10 @@ local instance actually uses: **`team-local`**.
 `POST /api/teams/team-local/templates` works and the template lands in the team
 tier, not the global one. `POST /api/templates` works too and needs no
 credential there, because with no `api_token` either there is no boundary to
-prove anything across.
+prove anything across — but only from the machine the server runs on. Both of
+those writes, like every other one in that mode, answer a caller from anywhere
+else with `401 the write API is disabled: set api_token or auth_enabled to
+accept writes from another machine`.
 
 With accounts on, the **operator's own view is narrower, not wider**. A caller
 presenting the `api_token` to `GET /api/templates` or `GET /api/templates/{slug}`
@@ -322,7 +326,9 @@ instead — no team is consulted, because the operator is in nobody's member lis
 Fork is the exception that reads one and writes the other: it needs `editor` in
 the team named by `team_id`, so with accounts on the `api_token` is not a
 credential for it and gets the ordinary `401`. With `auth_enabled: false` there
-is nobody to check and every route is permitted.
+is nobody to check and every route is permitted — to a caller the server accepts
+a write from at all, which with no `api_token` configured means one on its own
+machine.
 
 | `code` | Status | Means |
 |---|---|---|

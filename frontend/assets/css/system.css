@@ -71,6 +71,20 @@
   text-align: center;
 }
 
+/* "N of a cap the server enforces" — a section's declared fields, its writing
+   instruction's length. Two of these now render on the same settings card, and
+   they had disagreed: one went amber only at the cap, the other amber at nine
+   tenths and red past it, so amber meant "full" in one row and "nearly full" in
+   the row below. One ramp, and it is the one that warns before the refusal
+   rather than at it. */
+.cap-count {
+  font-size: var(--type-xs);
+  color: var(--color-text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.cap-count.is-near { color: var(--color-warning); }
+.cap-count.is-over { color: var(--color-error); }
+
 .card:hover { border-color: var(--color-border-strong); }
 
 .card-title {
