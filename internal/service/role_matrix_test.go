@@ -290,6 +290,33 @@ func TestRoles_ViewerCannotWriteAnything(t *testing.T) {
 			_, err := k.roadmap.AddNodes(ctx, rm.ID, []CreateRoadmapNodeRequest{{Title: "N"}}, nil)
 			return err
 		},
+		"roadmap update node": func(ctx context.Context) error {
+			rmWithNode, err := k.roadmap.AddNodes(owner, rm.ID, []CreateRoadmapNodeRequest{{Title: "To rename"}}, nil)
+			if err != nil {
+				return err
+			}
+			for _, n := range rmWithNode.Nodes {
+				if n.Title == "To rename" {
+					_, err := k.roadmap.UpdateNode(ctx, n.ID, UpdateRoadmapNodeRequest{Title: ptr("Renamed")})
+					return err
+				}
+			}
+			return errors.New("seeded node not returned")
+		},
+		"roadmap remove nodes": func(ctx context.Context) error {
+			// The node is created by the owner so that a viewer's refusal comes
+			// from the removal, not from an earlier add.
+			rmWithNode, err := k.roadmap.AddNodes(owner, rm.ID, []CreateRoadmapNodeRequest{{Title: "To remove"}}, nil)
+			if err != nil {
+				return err
+			}
+			for _, n := range rmWithNode.Nodes {
+				if n.Title == "To remove" {
+					return k.roadmap.RemoveNodes(ctx, rm.ID, []string{n.ID})
+				}
+			}
+			return errors.New("seeded node not returned")
+		},
 		"roadmap delete": func(ctx context.Context) error { return k.roadmap.Delete(ctx, rm.ID) },
 	}
 

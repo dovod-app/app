@@ -163,71 +163,9 @@ func (s *RoadmapService) Create(ctx context.Context, req CreateRoadmapRequest) (
 		return nil, fmt.Errorf("create roadmap: %w", err)
 	}
 
-	// Create nodes, building a tempID -> realID map for edge resolution
-	tempToReal := make(map[string]string)
-	var nodes []*domain.RoadmapNode
-	for _, nr := range req.Nodes {
-		nodeType := nr.NodeType
-		if nodeType == "" {
-			nodeType = "step"
-		}
-		nodeDate, nodeEnd, err := normalizeNodeRange(nr.NodeDate, nr.NodeEndDate)
-		if err != nil {
-			return nil, fmt.Errorf("node %q: %w", nr.Title, err)
-		}
-		node := &domain.RoadmapNode{
-			ID:          uuid.New().String(),
-			RoadmapID:   rm.ID,
-			Title:       normalizeTitle(nr.Title),
-			Description: normalizeContent(nr.Description),
-			NodeType:    nodeType,
-			Status:      nr.Status,
-			PositionX:   nr.PositionX,
-			PositionY:   nr.PositionY,
-			ParentID:    nr.ParentID,
-			RefType:     nr.RefType,
-			RefID:       nr.RefID,
-			Metadata:    nr.Metadata,
-			Stage:       nr.Stage,
-			NodeDate:    nodeDate,
-			NodeEndDate: nodeEnd,
-		}
-		if err := s.nodes.Create(ctx, node); err != nil {
-			return nil, fmt.Errorf("create node %q: %w", nr.Title, err)
-		}
-		if nr.TempID != "" {
-			tempToReal[nr.TempID] = node.ID
-		}
-		nodes = append(nodes, node)
-	}
-
-	// Create edges, resolving temp IDs
-	var edges []*domain.RoadmapEdge
-	for _, er := range req.Edges {
-		sourceID := er.SourceNodeRef
-		if real, ok := tempToReal[sourceID]; ok {
-			sourceID = real
-		}
-		targetID := er.TargetNodeRef
-		if real, ok := tempToReal[targetID]; ok {
-			targetID = real
-		}
-		edgeType := er.EdgeType
-		if edgeType == "" {
-			edgeType = "default"
-		}
-		edge := &domain.RoadmapEdge{
-			ID:           uuid.New().String(),
-			RoadmapID:    rm.ID,
-			SourceNodeID: sourceID,
-			TargetNodeID: targetID,
-			Label:        normalizeTitle(er.Label),
-			EdgeType:     edgeType,
-		}
-		if err := s.edges.Create(ctx, edge); err != nil {
-			return nil, fmt.Errorf("create edge: %w", err)
-		}
-		edges = append(edges, edge)
+	nodes, edges, err := s.createNodesAndEdges(ctx, rm, req.Nodes, req.Edges)
+	if err != nil {
+		return nil, err
 	}
 
 	rm.Nodes = nodes
@@ -626,7 +564,95 @@ func (s *RoadmapService) AddNodes(ctx context.Context, roadmapID string, nodeReq
 		return nil, err
 	}
 
-	tempToReal := make(map[string]string)
+	if _, _, err := s.createNodesAndEdges(ctx, rm, nodeReqs, edgeReqs); err != nil {
+		return nil, err
+	}
+
+	emit(ctx, s.events, Event{Type: "roadmap.updated", ResearchID: rm.ResearchID, EntityID: rm.ID, Entity: "roadmap"})
+
+	// Return full roadmap
+	return s.Get(ctx, roadmapID)
+}
+
+// nodeRefs answers what a node reference in a bulk request may name: a temp_id
+// declared in the same request, or the id of a node already in this roadmap.
+// Anything else is refused before a row is written — a bare id used to be
+// trusted, which let an edge or a parent link point into another research.
+type nodeRefs struct {
+	roadmapID string
+	declared  map[string]bool   // temp ids declared by the request
+	created   map[string]string // temp id -> id of the node created for it
+}
+
+func (s *RoadmapService) checkNodeRefs(ctx context.Context, rm *domain.Roadmap, nodeReqs []CreateRoadmapNodeRequest, edgeReqs []CreateRoadmapEdgeRequest) (*nodeRefs, error) {
+	refs := &nodeRefs{roadmapID: rm.ID, declared: map[string]bool{}, created: map[string]string{}}
+	for _, nr := range nodeReqs {
+		if nr.TempID != "" {
+			refs.declared[nr.TempID] = true
+		}
+	}
+	check := func(what, ref string) error {
+		if ref == "" {
+			return fmt.Errorf("%s needs a node reference: %w", what, ErrValidation)
+		}
+		if refs.declared[ref] {
+			return nil
+		}
+		node, err := s.nodes.FindByID(ctx, ref)
+		if err != nil {
+			return fmt.Errorf("find node %s: %w", ref, err)
+		}
+		if node == nil || node.RoadmapID != rm.ID {
+			return fmt.Errorf("%s node %s: %w", what, ref, ErrNotFound)
+		}
+		return nil
+	}
+	for _, nr := range nodeReqs {
+		if nr.ParentID == "" {
+			continue
+		}
+		if nr.TempID != "" && nr.ParentID == nr.TempID {
+			return nil, fmt.Errorf("node %q cannot be its own parent: %w", nr.Title, ErrValidation)
+		}
+		if err := check("parent", nr.ParentID); err != nil {
+			return nil, err
+		}
+	}
+	for _, er := range edgeReqs {
+		if err := check("edge source", er.SourceNodeRef); err != nil {
+			return nil, err
+		}
+		if err := check("edge target", er.TargetNodeRef); err != nil {
+			return nil, err
+		}
+	}
+	return refs, nil
+}
+
+// resolve maps a checked reference to a node id. A temp id whose node has not
+// been created yet resolves to "" and the caller fills it in afterwards.
+func (r *nodeRefs) resolve(ref string) string {
+	if r.declared[ref] {
+		return r.created[ref]
+	}
+	return ref
+}
+
+// createNodesAndEdges is the body shared by Create and AddNodes. Every
+// reference is checked before the first insert, so a request that names a node
+// outside the roadmap creates nothing rather than half of itself.
+func (s *RoadmapService) createNodesAndEdges(ctx context.Context, rm *domain.Roadmap, nodeReqs []CreateRoadmapNodeRequest, edgeReqs []CreateRoadmapEdgeRequest) ([]*domain.RoadmapNode, []*domain.RoadmapEdge, error) {
+	refs, err := s.checkNodeRefs(ctx, rm, nodeReqs, edgeReqs)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var nodes []*domain.RoadmapNode
+	type pendingParent struct {
+		node   *domain.RoadmapNode
+		parent string
+	}
+	var pending []pendingParent
 	for _, nr := range nodeReqs {
 		nodeType := nr.NodeType
 		if nodeType == "" {
@@ -634,7 +660,7 @@ func (s *RoadmapService) AddNodes(ctx context.Context, roadmapID string, nodeReq
 		}
 		nodeDate, nodeEnd, err := normalizeNodeRange(nr.NodeDate, nr.NodeEndDate)
 		if err != nil {
-			return nil, fmt.Errorf("node %q: %w", nr.Title, err)
+			return nil, nil, fmt.Errorf("node %q: %w", nr.Title, err)
 		}
 		node := &domain.RoadmapNode{
 			ID:          uuid.New().String(),
@@ -645,7 +671,7 @@ func (s *RoadmapService) AddNodes(ctx context.Context, roadmapID string, nodeReq
 			Status:      nr.Status,
 			PositionX:   nr.PositionX,
 			PositionY:   nr.PositionY,
-			ParentID:    nr.ParentID,
+			ParentID:    refs.resolve(nr.ParentID),
 			RefType:     nr.RefType,
 			RefID:       nr.RefID,
 			Metadata:    nr.Metadata,
@@ -654,22 +680,26 @@ func (s *RoadmapService) AddNodes(ctx context.Context, roadmapID string, nodeReq
 			NodeEndDate: nodeEnd,
 		}
 		if err := s.nodes.Create(ctx, node); err != nil {
-			return nil, fmt.Errorf("create node %q: %w", nr.Title, err)
+			return nil, nil, fmt.Errorf("create node %q: %w", nr.Title, err)
 		}
 		if nr.TempID != "" {
-			tempToReal[nr.TempID] = node.ID
+			refs.created[nr.TempID] = node.ID
+		}
+		if nr.ParentID != "" && node.ParentID == "" {
+			// The parent is declared later in the same request.
+			pending = append(pending, pendingParent{node: node, parent: nr.ParentID})
+		}
+		nodes = append(nodes, node)
+	}
+	for _, pp := range pending {
+		pp.node.ParentID = refs.resolve(pp.parent)
+		if err := s.nodes.Update(ctx, pp.node); err != nil {
+			return nil, nil, fmt.Errorf("set parent of %q: %w", pp.node.Title, err)
 		}
 	}
 
+	var edges []*domain.RoadmapEdge
 	for _, er := range edgeReqs {
-		sourceID := er.SourceNodeRef
-		if real, ok := tempToReal[sourceID]; ok {
-			sourceID = real
-		}
-		targetID := er.TargetNodeRef
-		if real, ok := tempToReal[targetID]; ok {
-			targetID = real
-		}
 		edgeType := er.EdgeType
 		if edgeType == "" {
 			edgeType = "default"
@@ -677,20 +707,17 @@ func (s *RoadmapService) AddNodes(ctx context.Context, roadmapID string, nodeReq
 		edge := &domain.RoadmapEdge{
 			ID:           uuid.New().String(),
 			RoadmapID:    rm.ID,
-			SourceNodeID: sourceID,
-			TargetNodeID: targetID,
+			SourceNodeID: refs.resolve(er.SourceNodeRef),
+			TargetNodeID: refs.resolve(er.TargetNodeRef),
 			Label:        normalizeTitle(er.Label),
 			EdgeType:     edgeType,
 		}
 		if err := s.edges.Create(ctx, edge); err != nil {
-			return nil, fmt.Errorf("create edge: %w", err)
+			return nil, nil, fmt.Errorf("create edge: %w", err)
 		}
+		edges = append(edges, edge)
 	}
-
-	emit(ctx, s.events, Event{Type: "roadmap.updated", ResearchID: rm.ResearchID, EntityID: rm.ID, Entity: "roadmap"})
-
-	// Return full roadmap
-	return s.Get(ctx, roadmapID)
+	return nodes, edges, nil
 }
 
 // UpdateNode updates a single node.
@@ -734,6 +761,20 @@ func (s *RoadmapService) UpdateNode(ctx context.Context, nodeID string, req Upda
 		node.PositionY = *req.PositionY
 	}
 	if req.ParentID != nil {
+		// The parent is a node id the caller supplies, and the only thing it may
+		// name is another node of this roadmap: the same rule as removal.
+		if *req.ParentID != "" {
+			if *req.ParentID == node.ID {
+				return nil, fmt.Errorf("node %s cannot be its own parent: %w", node.ID, ErrValidation)
+			}
+			parent, err := s.nodes.FindByID(ctx, *req.ParentID)
+			if err != nil {
+				return nil, fmt.Errorf("find parent: %w", err)
+			}
+			if parent == nil || parent.RoadmapID != node.RoadmapID {
+				return nil, fmt.Errorf("parent node %s: %w", *req.ParentID, ErrNotFound)
+			}
+		}
 		node.ParentID = *req.ParentID
 	}
 	if req.RefType != nil {
@@ -790,8 +831,21 @@ func (s *RoadmapService) RemoveNodes(ctx context.Context, roadmapID string, node
 		return err
 	}
 
+	// Every id is checked against this roadmap before anything is deleted, so a
+	// list that names a node elsewhere removes nothing rather than half of it.
+	// A node in another roadmap is reported exactly like a node that does not
+	// exist: the caller has no right to learn which of the two it was.
 	for _, nodeID := range nodeIDs {
-		if err := s.nodes.Delete(ctx, nodeID); err != nil {
+		node, err := s.nodes.FindByID(ctx, nodeID)
+		if err != nil {
+			return fmt.Errorf("find node %s: %w", nodeID, err)
+		}
+		if node == nil || node.RoadmapID != rm.ID {
+			return fmt.Errorf("node %s: %w", nodeID, ErrNotFound)
+		}
+	}
+	for _, nodeID := range nodeIDs {
+		if _, err := s.nodes.DeleteFromRoadmap(ctx, rm.ID, nodeID); err != nil {
 			return fmt.Errorf("delete node %s: %w", nodeID, err)
 		}
 	}
