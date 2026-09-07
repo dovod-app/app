@@ -22,8 +22,10 @@ func TestSectionInstruction_RefusalIsAFieldError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/sections/"+s.sectionID, strings.NewReader(body))
 	// A local caller: the fixture runs with no credential configured, where
-	// only a loopback request may write.
+	// only a loopback request may write. httptest defaults RemoteAddr to
+	// 192.0.2.1 and Host to example.com, and auth.LocalRequest reads both.
 	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = "localhost:8088"
 	req.Header.Set("Content-Type", "application/json")
 	s.mux.ServeHTTP(rec, req)
 
@@ -51,6 +53,8 @@ func TestSectionInstruction_RefusalIsAFieldError(t *testing.T) {
 	// section that does not exist is still a 404 with no field.
 	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/api/sections/does-not-exist", strings.NewReader(`{"display_name":"x"}`))
+	req.RemoteAddr = "127.0.0.1:54321"
+	req.Host = "localhost:8088"
 	req.Header.Set("Content-Type", "application/json")
 	s.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
