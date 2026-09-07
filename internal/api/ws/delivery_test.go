@@ -3,6 +3,8 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 )
@@ -156,7 +158,7 @@ func TestDeliver_MembershipChangeForgetsEveryVerdict(t *testing.T) {
 		research: map[string][]string{"r1": {"alice"}},
 		teams:    map[string][]string{"t1": {"alice"}},
 	}}
-	hub := quietHub()
+	hub := undrainedHub()
 	hub.SetAuthorizer(auth, true)
 	hub.attach("alice", 16)
 
@@ -179,6 +181,27 @@ func TestDeliver_MembershipChangeForgetsEveryVerdict(t *testing.T) {
 	hub.deliver(entry)
 	if n := auth.calls.Load(); n != 3 {
 		t.Errorf("authorizer asked %d times after a transfer, want 3", n)
+	}
+}
+
+// undrainedHub is a hub whose run goroutine was never started, so a broadcast
+// event stays in the queue.
+//
+// That is the property the test above is about, said in the fixture: Broadcast
+// flushes the verdict cache *before* it enqueues, so the flush must hold even
+// when the event never leaves the queue. It is also the only way to count
+// authorizer calls deterministically. With the drainer running, the hub
+// delivers the broadcast itself on another goroutine — `research.transferred`
+// is a research event, so that delivery asks CanReadResearch and caches the
+// answer again — and whether it landed before or after the assertion was a
+// scheduling accident: the test failed once on CI with "asked 4 times, want 3"
+// while the same commit passed on the two other runners.
+func undrainedHub() *Hub {
+	return &Hub{
+		clients:  make(map[*Client]struct{}),
+		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		queue:    make(chan Event, broadcastQueue),
+		verdicts: newVerdictCache(),
 	}
 }
 

@@ -492,6 +492,282 @@ func TestSessionDelete_KeepsTheDocumentsItProduced(t *testing.T) {
 	}
 }
 
+// TestDelete_ClearsReferencesWrittenByMarks is the fourth place the missing
+// foreign keys on `crossrefs` bite.
+//
+// A mark's resolution can cite other work, and those rows are stored under
+// source_type "annotation". The marks themselves cascade with the document, so
+// nothing was left to point at — but the rows stayed `resolved`, which means
+// the cited document went on showing a backlink from a mark that no longer
+// exists, and the deletion preview counted it as work that would break.
+//
+// All three deletes that can destroy a mark are covered here, because each has
+// its own path to it: one document, a section holding it, and the mark itself.
+func TestDelete_ClearsReferencesWrittenByMarks(t *testing.T) {
+	env := newDeleteEnv(t)
+	ctx := context.Background()
+
+	research, sections, err := env.research.Create(ctx, CreateResearchRequest{
+		Name: "Marks", Goal: "g",
+		Sections: []CreateSectionRequest{
+			{Name: "s1", DisplayName: "One"},
+			{Name: "s2", DisplayName: "Two"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// E1 is the document everything cites; the marks live on E2 and E3.
+	cited, err := env.entry.Create(ctx, CreateEntryRequest{
+		ResearchID: research.ID, SectionID: sections[0].ID,
+		Title: "Cited", Content: "Costs fall by 40 percent in year two.",
+	})
+	if err != nil {
+		t.Fatalf("create cited: %v", err)
+	}
+
+	annotations := NewAnnotationService(storage.NewAnnotationRepository(env.db),
+		storage.NewEntryRepository(env.db), storage.NewEntryRevisionRepository(env.db),
+		testAccess(env.db), env.entry, env.entry, env.notifier, slog.Default())
+
+	// A mark on a document in the *second* section, so the section delete below
+	// takes it with the document it hangs off.
+	marked, err := env.entry.Create(ctx, CreateEntryRequest{
+		ResearchID: research.ID, SectionID: sections[1].ID,
+		Title: "Marked", Content: "Seat based pricing is assumed throughout.",
+	})
+	if err != nil {
+		t.Fatalf("create marked: %v", err)
+	}
+	mark, err := annotations.Create(ctx, CreateAnnotationRequest{
+		EntryID: marked.ID, Quote: domain.Quote{Exact: "Seat based"},
+		Kind: domain.AnnotationDig, Body: "On what evidence?",
+	})
+	if err != nil {
+		t.Fatalf("create mark: %v", err)
+	}
+	if _, err := annotations.Answer(ctx, mark.ID, AnswerAnnotationRequest{
+		Resolution: "Settled in [[" + cited.Code + "]].",
+	}); err != nil {
+		t.Fatalf("answer mark: %v", err)
+	}
+
+	refsFrom := func(sourceID string) int {
+		t.Helper()
+		var n int
+		if err := env.db.NewSelect().ColumnExpr("COUNT(*)").TableExpr("crossrefs").
+			Where("source_type=?", "annotation").Where("source_id=?", sourceID).Scan(ctx, &n); err != nil {
+			t.Fatalf("count annotation crossrefs: %v", err)
+		}
+		return n
+	}
+	if refsFrom(mark.ID) != 1 {
+		t.Fatalf("setup: the resolution's reference was not stored")
+	}
+
+	// 1. Deleting the mark itself.
+	if err := annotations.Delete(ctx, mark.ID); err != nil {
+		t.Fatalf("delete mark: %v", err)
+	}
+	if n := refsFrom(mark.ID); n != 0 {
+		t.Errorf("%d reference(s) survived the mark that wrote them", n)
+	}
+
+	// 2. Deleting the document the mark is on.
+	second, err := annotations.Create(ctx, CreateAnnotationRequest{
+		EntryID: marked.ID, Quote: domain.Quote{Exact: "pricing"},
+		Kind: domain.AnnotationDig, Body: "Which plan?",
+	})
+	if err != nil {
+		t.Fatalf("create second mark: %v", err)
+	}
+	if _, err := annotations.Answer(ctx, second.ID, AnswerAnnotationRequest{
+		Resolution: "See [[" + cited.Code + "]].",
+	}); err != nil {
+		t.Fatalf("answer second mark: %v", err)
+	}
+	if refsFrom(second.ID) != 1 {
+		t.Fatalf("setup: the second resolution's reference was not stored")
+	}
+	if err := env.entry.Delete(ctx, marked.ID); err != nil {
+		t.Fatalf("delete document: %v", err)
+	}
+	if n := refsFrom(second.ID); n != 0 {
+		t.Errorf("%d reference(s) survived the document their mark was on", n)
+	}
+
+	// 3. Force-deleting a section holding a marked document.
+	third, err := env.entry.Create(ctx, CreateEntryRequest{
+		ResearchID: research.ID, SectionID: sections[1].ID,
+		Title: "Also marked", Content: "Churn is assumed flat.",
+	})
+	if err != nil {
+		t.Fatalf("create third: %v", err)
+	}
+	thirdMark, err := annotations.Create(ctx, CreateAnnotationRequest{
+		EntryID: third.ID, Quote: domain.Quote{Exact: "Churn"},
+		Kind: domain.AnnotationDig, Body: "Flat on what basis?",
+	})
+	if err != nil {
+		t.Fatalf("create third mark: %v", err)
+	}
+	if _, err := annotations.Answer(ctx, thirdMark.ID, AnswerAnnotationRequest{
+		Resolution: "Answered in [[" + cited.Code + "]].",
+	}); err != nil {
+		t.Fatalf("answer third mark: %v", err)
+	}
+	if refsFrom(thirdMark.ID) != 1 {
+		t.Fatalf("setup: the third resolution's reference was not stored")
+	}
+
+	env.notifier.reset()
+	if err := env.section.Delete(ctx, sections[1].ID, true); err != nil {
+		t.Fatalf("force-delete section: %v", err)
+	}
+	if n := refsFrom(thirdMark.ID); n != 0 {
+		t.Errorf("%d reference(s) survived the section that held their mark's document", n)
+	}
+
+	// And the documents that went with the section are announced by id. A page
+	// open on one of them hears `section.deleted` and cannot tell whether it was
+	// looking at a child of it, so without this it kept a document that is gone.
+	var announced []string
+	for _, e := range env.notifier.events {
+		if e.Type == "entry.deleted" {
+			announced = append(announced, e.EntityID)
+		}
+	}
+	if len(announced) != 1 || announced[0] != third.ID {
+		t.Errorf("entry.deleted events = %v, want exactly [%s]", announced, third.ID)
+	}
+	if !env.notifier.hasEvent("section.deleted") {
+		t.Error("the section itself was not announced")
+	}
+}
+
+// TestDeletionSummary_HidesCitingResearchesTheCallerMayNotRead is the
+// cross-team leak the fleet found, pinned.
+//
+// A cross-reference resolves without asking what its author may see — that is
+// deliberate, and it is why the raw query names every project that cites this
+// one. Reporting them unfiltered told an owner the short code and the *name* of
+// a project in a team they are not in, in a dialog they open by accident.
+//
+// The count goes with the names: `Access.VisibleIncomingCrossRefs` already
+// states that even a bare count announces that an unseen project cites this
+// one.
+func TestDeletionSummary_HidesCitingResearchesTheCallerMayNotRead(t *testing.T) {
+	env := newDeleteEnv(t)
+	alice, bob := setupTwoUsers(t, env.db)
+	aliceCtx, bobCtx := userCtx(alice), userCtx(bob)
+
+	target, sections, err := env.research.Create(aliceCtx, CreateResearchRequest{
+		Name: "Cited", Goal: "g",
+		Sections: []CreateSectionRequest{{Name: "s1", DisplayName: "S1"}},
+	})
+	if err != nil {
+		t.Fatalf("create alice's research: %v", err)
+	}
+	if _, err := env.entry.Create(aliceCtx, CreateEntryRequest{
+		ResearchID: target.ID, SectionID: sections[0].ID, Title: "Seed", Content: "body",
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
+	// Bob's research, in a team Alice is not in, citing Alice's.
+	citing, bobSections, err := env.research.Create(bobCtx, CreateResearchRequest{
+		Name: "Bob's confidential programme", Goal: "g",
+		Sections: []CreateSectionRequest{{Name: "s1", DisplayName: "S1"}},
+	})
+	if err != nil {
+		t.Fatalf("create bob's research: %v", err)
+	}
+	if _, err := env.entry.Create(bobCtx, CreateEntryRequest{
+		ResearchID: citing.ID, SectionID: bobSections[0].ID,
+		Title: "Cites", Content: "This rests on [[" + target.Code + ":E1]] entirely.",
+	}); err != nil {
+		t.Fatalf("seed citing entry: %v", err)
+	}
+
+	got, err := env.research.DeletionSummary(aliceCtx, target.ID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	for _, c := range got.IncomingFrom {
+		t.Errorf("the preview named %s %q, which is in a team the caller is not in", c.Code, c.Name)
+	}
+	if got.IncomingRefs != 0 {
+		t.Errorf("incoming_refs = %d, want 0 — the count announces the same thing the names do", got.IncomingRefs)
+	}
+	if got.IncomingFromTotal != 0 {
+		t.Errorf("incoming_from_total = %d, want 0", got.IncomingFromTotal)
+	}
+
+	// And Bob, who may read his own, is still told what he would break.
+	his, err := env.research.DeletionSummary(bobCtx, citing.ID)
+	if err != nil {
+		t.Fatalf("summary for bob: %v", err)
+	}
+	if his.Entries != 1 {
+		t.Errorf("bob's own preview counted %d documents, want 1", his.Entries)
+	}
+}
+
+// TestDeletes_RefuseAStranger is the ownership half, for the four deletes and
+// the preview. The role matrix next door covers members of the team; nothing
+// covered somebody outside it, and outside is where the interesting answer is:
+// ErrNotFound, never ErrForbidden, because confirming that a section or a
+// session exists is itself information about someone else's work.
+func TestDeletes_RefuseAStranger(t *testing.T) {
+	env := newDeleteEnv(t)
+	alice, bob := setupTwoUsers(t, env.db)
+	aliceCtx, strangerCtx := userCtx(alice), userCtx(bob)
+
+	research, sections, err := env.research.Create(aliceCtx, CreateResearchRequest{
+		Name: "Alice's", Goal: "g",
+		Sections: []CreateSectionRequest{{Name: "s1", DisplayName: "S1"}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	session, questions, err := env.session.Create(aliceCtx, CreateSessionRequest{
+		ResearchID: research.ID, Focus: "f",
+		Questions: []CreateQuestionRequest{{Text: "Why?"}},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	question := questions[0]
+
+	refusals := map[string]func() error{
+		"section delete":  func() error { return env.section.Delete(strangerCtx, sections[0].ID, false) },
+		"session delete":  func() error { return env.session.Delete(strangerCtx, session.ID) },
+		"question delete": func() error { return env.session.DeleteQuestion(strangerCtx, question.ID) },
+		"research delete": func() error { return env.research.Delete(strangerCtx, research.ID) },
+		"delete preview":  func() error { _, err := env.research.DeletionSummary(strangerCtx, research.ID); return err },
+	}
+	for name, call := range refusals {
+		if err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound", name, err)
+		}
+	}
+
+	// Nothing was destroyed on the way to those refusals.
+	if n := countWhere(t, env.db, "sections", "research_id", research.ID); n != 1 {
+		t.Errorf("%d section(s) left, want 1", n)
+	}
+	if n := countWhere(t, env.db, "sessions", "research_id", research.ID); n != 1 {
+		t.Errorf("%d session(s) left, want 1", n)
+	}
+	if n := countWhere(t, env.db, "questions", "session_id", session.ID); n != 1 {
+		t.Errorf("%d question(s) left, want 1", n)
+	}
+	if n := countWhere(t, env.db, "researches", "id", research.ID); n != 1 {
+		t.Error("the research was deleted by a stranger")
+	}
+}
+
 // TestDeletionSummary_CountsWhatWouldGo — "delete R7" and "delete 2 sections,
 // 1 document, 1 session, 2 questions and 1 task" are different decisions.
 func TestDeletionSummary_CountsWhatWouldGo(t *testing.T) {
@@ -512,4 +788,3 @@ func TestDeletionSummary_CountsWhatWouldGo(t *testing.T) {
 		t.Errorf("summary = %+v, want at least %+v", got, want)
 	}
 }
-

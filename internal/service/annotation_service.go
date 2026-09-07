@@ -406,6 +406,13 @@ func (s *AnnotationService) Delete(ctx context.Context, id string) error {
 		return annotationRefusal(err)
 	}
 	entry, _ := s.entries.FindByID(ctx, a.EntryID)
+	// A resolution can cite other work, and those references are stored under
+	// source_type "annotation". Nothing removes them with the row — `crossrefs`
+	// has no foreign keys — so the cited document went on showing a backlink
+	// from a mark that is gone.
+	if s.docs != nil {
+		s.docs.ClearCrossRefs(ctx, "annotation", id)
+	}
 	if err := s.annotations.Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete annotation: %w", err)
 	}

@@ -140,10 +140,21 @@ async function toggleArchive() {
   text-decoration: none;
   color: inherit;
   /* The card runs a `fade-up` animation, whose transform makes it a stacking
-     context — so an open menu was painted under the next card and its last row,
-     Delete, disappeared behind it on a card with no goal. The same hazard
-     `.page-header` already documents. */
+     context — so an open menu is painted inside the card rather than over the
+     grid, and on a short card its last row, Delete, disappeared under the card
+     after it. The same hazard `.page-header` already documents. */
   position: relative;
+}
+/* Only the card whose menu is open is raised. Giving *every* card
+   `z-index: var(--z-in-page)` did nothing: siblings at the same level paint in
+   tree order, so the next card still covered this one's menu. `:focus-within`
+   is the keyboard half — the trigger keeps focus while the panel is open — and
+   `:has` the pointer half, since a click on the trigger may not focus it. */
+.research-card:has(.action-menu-list),
+.research-card:focus-within {
+  /* --z-in-page, not --z-elevated: the sticky `.app-nav` sits at elevated, and
+     a card that ties with it wins on tree order and paints over the navigation
+     as you scroll. One is enough — the other cards are at auto. */
   z-index: var(--z-in-page);
 }
 .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); }

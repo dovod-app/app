@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dovod-app/app/internal/auth"
 	"github.com/dovod-app/app/internal/domain"
 	"github.com/dovod-app/app/internal/storage"
 )
@@ -41,11 +40,16 @@ func (s *ResearchService) DeletionSummary(ctx context.Context, idOrCode string) 
 	// warned about the breakage they can see and not about the breakage they
 	// cannot, which is the same trade the rest of the cross-reference surface
 	// makes.
-	uid := auth.UserIDFromContext(ctx)
+	// Asked of the guard rather than of the user id. `uid != "" && ...` failed
+	// open for a caller who is nobody, which on an instance with accounts is a
+	// stranger — an anonymous stdio session was handed the codes and the names
+	// of every project citing this one. Access.Read answers for the caller the
+	// context actually carries, in both postures: with accounts off it lets
+	// everything through, which is that mode's rule everywhere else too.
 	visible := summary.IncomingFrom[:0]
 	total := 0
 	for _, c := range summary.IncomingFrom {
-		if uid != "" && !s.access.CanReadResearch(ctx, uid, c.ID) {
+		if err := s.access.Read(ctx, c.ID); err != nil {
 			continue
 		}
 		total += c.Refs
@@ -104,12 +108,19 @@ func (s *ResearchService) Delete(ctx context.Context, idOrCode string) error {
 		return fmt.Errorf("delete research: %w", err)
 	}
 
-	// Two emissions, and they must not overlap.
+	// Two emissions, and they must not overlap for a member.
 	//
 	// The plain event is what reaches a client when auth is off: the hub lets
 	// everything through in that mode, and there is no user id to address. With
-	// auth on it reaches nobody, because the visibility check asks whether the
-	// caller may read a research that no longer exists.
+	// auth on it reaches no *member*, because the visibility check asks whether
+	// the caller may read a research that no longer exists.
+	//
+	// It does reach a share socket, which is right and was not designed: the
+	// hub decides a share connection from the token's own scope and never asks
+	// Access, so a visitor watching the public page is told the page is gone
+	// rather than finding out by failing. There is no duplicate there — a share
+	// connection has no user id, so no directed event can name it — and the
+	// socket closes with 4401 at the next credential sweep either way.
 	//
 	// The directed events are the other half. A directed event bypasses the
 	// research check by naming a user, which is the only way to tell somebody
@@ -166,7 +177,8 @@ func (s *SectionService) Delete(ctx context.Context, sectionID string, force boo
 	// here first would make the refusal advisory: the connection is released
 	// between a COUNT and the DELETE, and a document filed in that window would
 	// be destroyed with `force` never set.
-	if err := s.sections.DeleteCascade(ctx, sectionID, !force); err != nil {
+	deletedEntries, err := s.sections.DeleteCascade(ctx, sectionID, !force)
+	if err != nil {
 		var held *storage.SectionHasEntriesError
 		if errors.As(err, &held) {
 			return fmt.Errorf(
@@ -174,6 +186,22 @@ func (s *SectionService) Delete(ctx context.Context, sectionID string, force boo
 				ErrSectionNotEmpty, held.Count)
 		}
 		return fmt.Errorf("delete section: %w", err)
+	}
+	// The documents first, then the section that held them.
+	//
+	// A page open on one of these documents subscribes by document id; it hears
+	// `section.deleted` and cannot tell whether it was looking at a child of
+	// that section, so without these it kept rendering a document that is gone
+	// and failed on the next save. The order matters only for readability —
+	// both arrive before anything can act on either.
+	for _, id := range deletedEntries {
+		emit(ctx, s.events, Event{
+			Type:       "entry.deleted",
+			ResearchID: section.ResearchID,
+			EntityID:   id,
+			Entity:     "entry",
+			ParentID:   sectionID,
+		})
 	}
 	emit(ctx, s.events, Event{
 		Type:       "section.deleted",

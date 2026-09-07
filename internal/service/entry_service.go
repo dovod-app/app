@@ -596,6 +596,11 @@ func (s *EntryService) Delete(ctx context.Context, id string) error {
 		// graph went on drawing. Deleting a whole research already does this;
 		// deleting one document did not.
 		_ = s.crossrefs.UnresolveTargetEntries(ctx, []string{id})
+		// The marks on this document cascade with it, and the references they
+		// wrote do not — same missing foreign key, one table further out. Left
+		// behind, they keep a document elsewhere showing a backlink from a mark
+		// that no longer exists.
+		_ = s.crossrefs.DeleteForAnnotationsOn(ctx, []string{id})
 	}
 	if s.externalLinks != nil {
 		_ = s.externalLinks.ReplaceForSource(ctx, "entry", id, nil)
@@ -728,6 +733,19 @@ func extractDomain(rawURL string) string {
 // Can be called for entries, questions, or tasks.
 func (s *EntryService) ParseCrossRefs(ctx context.Context, sourceType, sourceID, researchID, text string) {
 	s.parseCrossRefs(ctx, sourceType, sourceID, researchID, text)
+}
+
+// ClearCrossRefs removes what one source wrote, for a caller deleting that
+// source. It is the other half of ParseCrossRefs and lives beside it: every
+// writer of references reaches them through this service, so every deleter
+// should too rather than growing its own repository dependency.
+func (s *EntryService) ClearCrossRefs(ctx context.Context, sourceType, sourceID string) {
+	if s.crossrefs == nil {
+		return
+	}
+	if err := s.crossrefs.DeleteBySource(ctx, sourceType, sourceID); err != nil {
+		s.log.Error("failed to clear crossrefs", "source_type", sourceType, "source_id", sourceID, "error", err)
+	}
 }
 
 func (s *EntryService) parseCrossRefs(ctx context.Context, sourceType, sourceID, researchID, text string) {

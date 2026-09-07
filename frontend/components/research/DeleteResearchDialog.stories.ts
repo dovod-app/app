@@ -33,6 +33,7 @@ const meta: Meta<typeof DeleteResearchDialog> = {
       tasks: 6,
       roadmaps: 2,
       annotations: 0,
+      memory: 0,
       shares: 0,
       incoming_refs: 0,
       incoming_from: null,
@@ -53,7 +54,7 @@ export const WithConsequencesElsewhere: Story = {
   args: {
     summary: {
       sections: 4, entries: 12, sessions: 3, questions: 21, tasks: 6, roadmaps: 2,
-      annotations: 3, shares: 1, incoming_refs: 5,
+      annotations: 3, memory: 0, shares: 1, incoming_refs: 5,
       incoming_from: [{ code: 'R2', name: 'Pricing' }, { code: 'R9', name: 'Competitors' }],
     },
   },
@@ -65,7 +66,22 @@ export const EmptyProject: Story = {
   args: {
     summary: {
       sections: 0, entries: 0, sessions: 0, questions: 0, tasks: 0, roadmaps: 0,
-      annotations: 0, shares: 0, incoming_refs: 0, incoming_from: null,
+      annotations: 0, memory: 0, shares: 0, incoming_refs: 0, incoming_from: null,
+    },
+  },
+}
+
+/**
+ * A project whose only content is memory — the agent's working record of how it
+ * has been conducted. It was counted and destroyed from the first version and
+ * shown by nothing, so this dialog said "Nothing has been filed under this
+ * project yet" about a project with fourteen notes in it.
+ */
+export const OnlyMemory: Story = {
+  args: {
+    summary: {
+      sections: 0, entries: 0, sessions: 0, questions: 0, tasks: 0, roadmaps: 0,
+      annotations: 0, memory: 14, shares: 0, incoming_refs: 0, incoming_from: null,
     },
   },
 }
@@ -125,7 +141,7 @@ export const SingularCounts: Story = {
     name: 'Sales call, 14 March',
     summary: {
       sections: 1, entries: 1, sessions: 1, questions: 1, tasks: 1, roadmaps: 1,
-      annotations: 1, shares: 1, incoming_refs: 1,
+      annotations: 1, memory: 0, shares: 1, incoming_refs: 1,
       incoming_from: [{ code: 'R2', name: 'Pricing' }],
     },
   },
@@ -140,7 +156,7 @@ export const CitedByOneProject: Story = {
   args: {
     summary: {
       sections: 4, entries: 12, sessions: 0, questions: 0, tasks: 0, roadmaps: 0,
-      annotations: 0, shares: 0, incoming_refs: 3,
+      annotations: 0, memory: 0, shares: 0, incoming_refs: 3,
       incoming_from: [{ code: 'R2', name: 'Pricing' }],
     },
   },
@@ -158,7 +174,7 @@ export const CitedByProjectsNotNamed: Story = {
   args: {
     summary: {
       sections: 4, entries: 12, sessions: 2, questions: 0, tasks: 0, roadmaps: 0,
-      annotations: 0, shares: 2, incoming_refs: 7, incoming_from: null,
+      annotations: 0, memory: 0, shares: 2, incoming_refs: 7, incoming_from: null,
     },
   },
 }
@@ -174,7 +190,7 @@ export const ALargeProject: Story = {
     name: 'Customer research programme, 2024–2026',
     summary: {
       sections: 18, entries: 1284, sessions: 96, questions: 743, tasks: 210,
-      roadmaps: 7, annotations: 388, shares: 4, incoming_refs: 152,
+      roadmaps: 7, annotations: 388, memory: 0, shares: 4, incoming_refs: 152,
       incoming_from: [
         { code: 'R2', name: 'Pricing' },
         { code: 'R9', name: 'Competitors' },

@@ -367,6 +367,7 @@ func NewServer(
 		"tasks":               {Type: "integer"},
 		"roadmaps":            {Type: "integer"},
 		"annotations":         {Type: "integer"},
+		"memory":              {Type: "integer", Description: "Memory notes — the agent's working record of how the project has been conducted."},
 		"shares":              {Type: "integer", Description: "Live share links, which stop working immediately."},
 		"incoming_refs":       {Type: "integer", Description: "References from other projects into this one. **Not deleted** — they survive as the text that was written and stop resolving, because removing them would edit a project nobody asked to change."},
 		"incoming_from_total": {Type: "integer", Description: "How many projects cite this one in total, before the cap on the list below — so a client can say \"and 79 others\" rather than \"and 9 others\"."},

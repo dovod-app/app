@@ -11,6 +11,7 @@ export interface DeletionSummary {
   tasks: number
   roadmaps: number
   annotations: number
+  memory: number
   shares: number
   incoming_refs: number
   incoming_from: CitingResearch[] | null
@@ -51,6 +52,11 @@ export function deletionLines(s: DeletionSummary | null): string[] {
   if (s.tasks) out.push(plural(s.tasks, 'task', 'tasks'))
   if (s.roadmaps) out.push(plural(s.roadmaps, 'roadmap', 'roadmaps'))
   if (s.annotations) out.push(plural(s.annotations, 'mark', 'marks'))
+  // Counted and destroyed since the first version, and shown by nothing: a
+  // project holding only memory notes read "Nothing has been filed under this
+  // project yet" in the danger zone, one click before a dialog that deleted
+  // them.
+  if (s.memory) out.push(plural(s.memory, 'memory note', 'memory notes'))
   return out
 }
 

@@ -223,8 +223,12 @@ func (e *SectionHasEntriesError) Error() string {
 	return fmt.Sprintf("section has %d entries", e.Count)
 }
 
-func (r *SectionRepository) DeleteCascade(ctx context.Context, sectionID string, expectEmpty bool) error {
-	return r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+// It returns the ids of the documents that went with the section, because the
+// service has to name each of them in an event: a tab open on one of those
+// documents hears `section.deleted` and has no way to know it was looking at a
+// child of it, so it kept the page and 404ed on the next save.
+func (r *SectionRepository) DeleteCascade(ctx context.Context, sectionID string, expectEmpty bool) (deleted []string, err error) {
+	err = r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var entryIDs []string
 		if err := tx.NewSelect().Column("id").Table("entries").
 			Where("section_id=?", sectionID).Scan(ctx, &entryIDs); err != nil {
@@ -245,6 +249,14 @@ func (r *SectionRepository) DeleteCascade(ctx context.Context, sectionID string,
 			if err := deleteRefsBySource(ctx, tx, "entry", entryIDs); err != nil {
 				return err
 			}
+			// A mark writes references of its own, from its resolution text,
+			// under source_type "annotation". The marks themselves cascade with
+			// their documents; their references do not, because `crossrefs` has
+			// no foreign keys — so the cited document kept a backlink from a
+			// mark that no longer exists, and the deletion preview counted it.
+			if err := deleteRefsOfAnnotationsOn(ctx, tx, entryIDs); err != nil {
+				return err
+			}
 			// References from elsewhere into these documents survive as
 			// unresolved text, for the same reason they do when a whole
 			// research goes: deleting them would edit somebody else's document.
@@ -260,8 +272,15 @@ func (r *SectionRepository) DeleteCascade(ctx context.Context, sectionID string,
 		if _, err := tx.NewDelete().Table("sections").Where("id=?", sectionID).Exec(ctx); err != nil {
 			return fmt.Errorf("delete section: %w", err)
 		}
+		deleted = entryIDs
 		return nil
 	})
+	if err != nil {
+		// Nothing was committed, so nothing was deleted — the caller must not
+		// announce documents that are still there.
+		return nil, err
+	}
+	return deleted, nil
 }
 
 // DeleteCascade removes a session and the questions asked in it.
@@ -280,6 +299,14 @@ func (r *SessionRepository) DeleteCascade(ctx context.Context, sessionID string)
 		}
 		if err := deleteRefsBySource(ctx, tx, "question", questionIDs); err != nil {
 			return err
+		}
+		// `questions:Q:<sessionID>` is scoped by the session, so once the
+		// session is gone the row can never be reached again. Left behind, it
+		// also survives the research delete, which looks its counters up by the
+		// ids of the sessions that still exist.
+		if _, err := tx.NewDelete().Table("storage_counters").
+			Where("scope_key LIKE ?", "%:"+sessionID).Exec(ctx); err != nil {
+			return fmt.Errorf("delete counters for session %s: %w", sessionID, err)
 		}
 		if _, err := tx.NewDelete().Table("sessions").Where("id=?", sessionID).Exec(ctx); err != nil {
 			return fmt.Errorf("delete session: %w", err)
@@ -316,6 +343,41 @@ func (r *CrossRefRepository) UnresolveTargetEntries(ctx context.Context, entryID
 		Set("target_research_id=NULL").
 		Set("resolved=0").
 		Where("target_entry_id IN (?)", bun.In(entryIDs)).Exec(ctx)
+	return err
+}
+
+// deleteRefsOfAnnotationsOn clears the references written by the marks on these
+// documents, without needing their ids: one statement, so the section cascade
+// and the single-document delete cannot drift.
+//
+// A subquery rather than two round trips because the section cascade runs
+// inside a transaction and the count of marks is unbounded; `annotations` is a
+// different table from `crossrefs`, so no dialect refuses it.
+func deleteRefsOfAnnotationsOn(ctx context.Context, q Querier, entryIDs []string) error {
+	if len(entryIDs) == 0 {
+		return nil
+	}
+	sub := q.NewSelect().Column("id").Table("annotations").Where("entry_id IN (?)", bun.In(entryIDs))
+	if _, err := q.NewDelete().Table("crossrefs").
+		Where("source_type=?", "annotation").
+		Where("source_id IN (?)", sub).Exec(ctx); err != nil {
+		return fmt.Errorf("delete crossrefs written by marks: %w", err)
+	}
+	return nil
+}
+
+// DeleteForAnnotationsOn is the same cleanup for a caller with no transaction of
+// its own — the single-document delete.
+func (r *CrossRefRepository) DeleteForAnnotationsOn(ctx context.Context, entryIDs []string) error {
+	return deleteRefsOfAnnotationsOn(ctx, r.db, entryIDs)
+}
+
+// DeleteBySource clears the references one source wrote. `ReplaceForSource` with
+// no refs does the same thing; this name says what the caller means.
+func (r *CrossRefRepository) DeleteBySource(ctx context.Context, sourceType, sourceID string) error {
+	_, err := r.db.NewDelete().Table("crossrefs").
+		Where("source_type=?", sourceType).
+		Where("source_id=?", sourceID).Exec(ctx)
 	return err
 }
 
