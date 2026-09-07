@@ -2,6 +2,8 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/dovod-app/app/internal/auth"
@@ -96,6 +98,47 @@ func TestShareDelivery_IncludeFlagsFilterTheStream(t *testing.T) {
 	hub.deliver(Event{Type: "entry.created", Entity: "entry", EntityID: "e1", ResearchID: "r1"})
 	if _, ok := received(t, visitor); !ok {
 		t.Error("the flags filtered out the content the link exists to show")
+	}
+}
+
+// A section now carries two fields a share never sees — `field_spec` and, since
+// #82, `instruction`. The event that announces a change to either still reaches
+// a visitor, and that is a decision rather than an oversight: the shared page
+// refetches on this event, so suppressing it would leave a renamed or reordered
+// section stale on screen.
+//
+// What must never widen is what the envelope carries. This pins that: the
+// visitor is told a section changed and when, and is told nothing about what
+// changed in it.
+func TestShareDelivery_SectionEventsCarryNoInstruction(t *testing.T) {
+	hub := quietHub()
+	hub.SetAuthorizer(fakeAuth{}, true)
+
+	// Nothing switched on — the narrowest link there is.
+	visitor := hub.attachShare("r1", domain.ShareInclude{}, 16)
+
+	const secret = "Name the producing service. State the consumer."
+	hub.deliver(Event{
+		Type: "section.updated", Entity: "section", EntityID: "sec1",
+		ResearchID: "r1", ResearchCode: "R1",
+	})
+	got, ok := received(t, visitor)
+	if !ok {
+		t.Fatal("a share visitor stopped seeing section changes; the shared page repaints on this event")
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), secret) {
+		t.Errorf("a section event carried the instruction itself: %s", encoded)
+	}
+	// The envelope has no field that could carry it. If one is ever added, this
+	// is the line that has to be thought about again.
+	for _, field := range []string{"instruction", "field_spec", "description"} {
+		if strings.Contains(string(encoded), field) {
+			t.Errorf("the section event envelope grew a %q field: %s", field, encoded)
+		}
 	}
 }
 

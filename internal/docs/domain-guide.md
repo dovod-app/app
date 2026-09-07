@@ -222,6 +222,7 @@ That list is the whole surface. Anything else under the prefix — another metho
 
 - Private skills and memory — memory is redacted on research reads, and skill services and exports exclude skills for share contexts. They are the agent's working notes about how to conduct the research, not a result, and their author did not publish them by sending a link to the findings.
 - `user_id`, `team_id`, `team_name`, `team_is_personal` — a share is about one research, not about the organisation behind it. `role` survives and is always `viewer`.
+- The section's `instruction`. How a team writes here is working process, like the memory above it: a visitor was handed the findings, not the conventions they were written under. It is stripped from every section a share reads, so the shared research page, the graph, the export and the vault never carry one.
 - Document metadata, values and declaration both. An entry's `metadata`, `spec_version` and `metadata_status` are stripped, and so is the section's `field_spec` — a list of twelve field labels with nothing in them still says what the team decided to track, and the values are exactly the facts a declaration invites a team to record: an owner, a cost, an interviewee, an internal ticket.
 - Any other research. There is no list route under the prefix, and the listing service itself answers empty for a share rather than falling through to "no user in context, so no filter" — which would have returned every research on the server.
 - The portable JSON: its route is not mounted. The Obsidian vault is available when `include.export` allows it, with memory and private skills excluded; revisions and provenance are refused. See [Export](/llms/export.md#export-through-a-share-link).
@@ -254,6 +255,7 @@ Logical division within a research. Organizes entries by topic.
 | `position` | int | Sort order (0-based) — investigation sequence |
 | `status` | enum | `draft` / `active` / `completed` / `archived` |
 | `code` | string | Auto-assigned: `S1`, `S2`... (per research) |
+| `instruction` | string | How to write a document **in this section** — three to six lines of imperatives, read before every document filed here. At most 500 characters, counted in runes. Empty is the normal case |
 | `field_spec` | object[] | What documents in this section record: `{key, label, type, required, repeated, options, help}`. Empty is the normal case and means the section accepts no metadata at all |
 | `spec_version` | int | Bumped when `field_spec` actually changes; entries record the version their values were validated against |
 
@@ -263,7 +265,9 @@ Logical division within a research. Organizes entries by topic.
 - Requires at least one entry before marking `completed`.
 - A section is usually a *topic* and declares nothing. Declare `field_spec` only when it holds one class of document repeatedly — eighteen specifications, not eight loose questions. The vocabulary is then closed: an entry may write those keys and no others. See [Document Metadata](/llms/metadata.md).
 - `field_spec` is settable only through `section_update` / `PUT /api/sections/{sectionId}` — neither `research_create` nor `research_add_section` accepts one. A portable import is the exception: the declaration travels with the section.
-- `section_list` and `research_get` return `spec_version` on every section and `field_spec` only when it is non-empty.
+- `instruction` is settable the same two ways and nowhere else, with the same import exception — where an over-long one is dropped rather than refused, and named in the import's `warnings` so the loss is visible. `null` leaves it alone and `""` removes it; over REST the property may also simply be left out, while the `section_update` schema requires it like every other property, so send `null` there. Over 500 runes it is **refused**, never truncated — `instruction must be 500 characters or fewer…`, a `400` over REST — because half a rule reads like a whole one.
+- **An instruction says what a document here looks like and nothing wider.** The research's memory says what *this research* is, a [skill](#skill) says how a *kind of work* is done, and this says how to write in this section; most specific wins on a direct conflict. An instruction restating research-wide tone or methodology is misfiled. Where the section also declares `field_spec`, the instruction should name those keys, or the two end up describing the same document differently. See [Skills → Three places a rule can live](/llms/skills.md) and [Document Metadata](/llms/metadata.md).
+- `section_list` and `research_get` return `spec_version` on every section, and `field_spec` and `instruction` only when they are non-empty. REST section payloads carry `instruction` always, as `""` when there is none.
 
 ---
 

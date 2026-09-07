@@ -327,6 +327,60 @@ func TestRoles_ViewerCannotWriteAnything(t *testing.T) {
 	}
 }
 
+// A section instruction is read by everyone in the team and written only by
+// somebody who may write content. It is a convention for the documents, not a
+// setting about the team, so it does not need an owner.
+func TestRoles_SectionInstructionIsReadByEveryoneAndWrittenByWriters(t *testing.T) {
+	const instruction = "Name the producing service. State the consumer."
+	for _, tc := range []struct {
+		role     domain.TeamRole
+		mayWrite bool
+	}{
+		{domain.TeamViewer, false},
+		{domain.TeamEditor, true},
+		{domain.TeamOwner, true},
+	} {
+		t.Run(string(tc.role), func(t *testing.T) {
+			k := newRoleKit(t)
+			owner, member, research, section, _ := k.sharedResearch(t, tc.role)
+
+			if _, err := k.section.Update(owner, section.ID, UpdateSectionRequest{
+				Instruction: ptr(instruction),
+			}); err != nil {
+				t.Fatalf("seed instruction: %v", err)
+			}
+
+			// Reading it is the point of the feature: the member has to see the
+			// same rule the agent writing here does.
+			list, err := k.section.List(member, research.ID)
+			if err != nil || len(list) == 0 {
+				t.Fatalf("a %s could not list sections: %v", tc.role, err)
+			}
+			if list[0].Instruction != instruction {
+				t.Errorf("a %s reads the section instruction as %q", tc.role, list[0].Instruction)
+			}
+
+			_, err = k.section.Update(member, section.ID, UpdateSectionRequest{
+				Instruction: ptr("Rewritten by a " + string(tc.role)),
+			})
+			if tc.mayWrite && err != nil {
+				t.Fatalf("a %s should be able to write the instruction: %v", tc.role, err)
+			}
+			if !tc.mayWrite && !errors.Is(err, ErrForbidden) {
+				t.Fatalf("a %s wrote the section instruction (err=%v)", tc.role, err)
+			}
+
+			after, err := k.section.Get(owner, section.ID)
+			if err != nil {
+				t.Fatalf("read back: %v", err)
+			}
+			if !tc.mayWrite && after.Instruction != instruction {
+				t.Errorf("a viewer's refused write still landed: %q", after.Instruction)
+			}
+		})
+	}
+}
+
 func TestRoles_EditorCanWriteButNotAdminister(t *testing.T) {
 	k := newRoleKit(t)
 	_, editor, research, section, teamID := k.sharedResearch(t, domain.TeamEditor)

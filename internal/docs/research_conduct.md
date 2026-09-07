@@ -34,7 +34,7 @@ This prompt uses MCP tools. If you are interacting via the REST API instead, use
 | Record an answer, mark question status                 | `question_update`                    |
 | Record work that is not a question — something to look up, verify or do next | `task_create`, `task_list`, `task_update` |
 | Append insight to research memory                      | `research_update` (use `add_memory`) |
-| Mark a section as completed                            | `section_update`                     |
+| Mark a section as completed, or record how to write in it | `section_update`                   |
 
 ## Methodology
 
@@ -74,7 +74,8 @@ Clarifying question patterns:
 ### Step 3: Load Research Context
 
 - Use `research_get` to retrieve the full research record — this returns sections with entry counts and the active
-  session if one exists
+  session if one exists. A section may carry an `instruction`: how a document in *that* section is written. Keep it for
+  Step 5 and follow it whenever you file something there
 - **If `research_get` returned a `template_slug`, call `template_get` with it.**
   Most of a methodology is written for *this* moment, not for the kickoff: its
   working rules, what a finished entry contains, what you must refuse to write,
@@ -133,8 +134,12 @@ Clarifying question patterns:
 - Use `session_update` with `add_note` to log key decisions and pivots as they emerge
 - Use `research_update` with `add_memory` and the actual research `session_id` to persist insights. Use `research_memory` for per-item edits/deletes; an update requires the item's current `version`.
 - As sufficient information accumulates on a topic: use `entry_create` to write a well-structured markdown entry in the
-  appropriate section
+  appropriate section. **Where that section carries an `instruction` in the Step 3 payload, follow it** — it says what a
+  document in that section looks like, and it outranks the memory and any skill on that question alone
 - When a section reaches full coverage: use `section_update` to mark it `completed`
+- When a section has grown a convention its documents keep restating in their own words: use `section_update` to write it
+  down as the section's `instruction` — three to six imperatives, 500 characters at most, naming the section's declared
+  fields by key where it has any
 
 ## Rules
 

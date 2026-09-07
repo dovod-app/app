@@ -36,17 +36,25 @@ func RegisterResearchImport(srv *mcp.Server, exportSvc *service.ExportService, l
 			teamID = *input.TeamID
 		}
 
-		research, err := exportSvc.Import(ctx, &data, teamID)
+		research, warnings, err := exportSvc.Import(ctx, &data, teamID)
 		if err != nil {
 			log.Error("research_import failed", "error", err)
 			return errorResult(err.Error())
 		}
 
-		return successResult(map[string]any{
+		out := map[string]any{
 			"status":      "imported",
 			"research_id": research.ID,
 			"code":        research.Code,
 			"name":        research.Name,
-		})
+		}
+		// What the file carried and the import could not — a section whose
+		// writing instruction was over the limit arrives without one, and the
+		// agent that just imported it is the only reader in a position to put
+		// it back. Absent when there is nothing to report.
+		if len(warnings) > 0 {
+			out["warnings"] = warnings
+		}
+		return successResult(out)
 	})
 }

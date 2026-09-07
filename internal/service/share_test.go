@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,6 +238,75 @@ func TestShare_InstructionAndMemoryNeverAppear(t *testing.T) {
 	skills, err := k.research.researches.ExportPrivateSkills(owner, own.ID)
 	if err != nil || len(skills) != 1 || skills[0].Body != "Do not tell the client we are guessing" {
 		t.Fatalf("owner private instruction: %+v %v", skills, err)
+	}
+}
+
+// How a team writes is working process, like the research's memory beside it.
+// A visitor holding a read-only link to the findings was never handed the
+// conventions those findings were written under.
+func TestShare_SectionInstructionNeverAppears(t *testing.T) {
+	k := newShareKit(t)
+	owner, _, research, section, _ := k.sharedResearch(t, domain.TeamViewer)
+
+	const instruction = "Name the producing service. State the consumer."
+	if _, err := k.section.Update(owner, section.ID, UpdateSectionRequest{
+		Instruction: ptr(instruction),
+	}); err != nil {
+		t.Fatalf("set instruction: %v", err)
+	}
+	if _, err := k.entry.Create(owner, CreateEntryRequest{
+		ResearchID: research.ID, SectionID: section.ID, Title: "Seed", Content: "body",
+	}); err != nil {
+		t.Fatalf("seed entry: %v", err)
+	}
+
+	result, err := k.shares.Create(owner, research.ID, CreateShareRequest{Include: allIncluded()})
+	if err != nil {
+		t.Fatalf("create share: %v", err)
+	}
+	ctx := visit(t, k, result.Token)
+
+	// The section page: the list the shared research view is drawn from.
+	list, err := k.section.List(ctx, research.ID)
+	if err != nil {
+		t.Fatalf("list sections: %v", err)
+	}
+	for _, sec := range list {
+		if sec.Instruction != "" {
+			t.Errorf("section %s leaked its instruction to a share visitor: %q", sec.Name, sec.Instruction)
+		}
+	}
+
+	// And the single-section read, which is a separate entry point.
+	one, err := k.section.Get(ctx, section.ID)
+	if err != nil {
+		t.Fatalf("get section: %v", err)
+	}
+	if one.Instruction != "" {
+		t.Errorf("a direct section read leaked the instruction: %q", one.Instruction)
+	}
+
+	// The Obsidian vault. It carries a README per section, so a change that
+	// starts writing the instruction into one has to fail here rather than ship.
+	obsidian := NewObsidianService(k.research, k.section, storage.NewEntryRepository(k.db),
+		k.session, k.task, k.roadmap, storage.NewEntryRevisionRepository(k.db), slog.Default())
+	vault, err := obsidian.Vault(ctx, research.ID, DefaultVaultOptions())
+	if err != nil {
+		t.Fatalf("build vault: %v", err)
+	}
+	for _, f := range vault.Files {
+		if strings.Contains(string(f.Content), instruction) {
+			t.Errorf("the vault file %s carries the section instruction", f.Path)
+		}
+	}
+
+	// Redaction is per reader. The owner still has their own convention.
+	own, err := k.section.Get(owner, section.ID)
+	if err != nil {
+		t.Fatalf("owner read: %v", err)
+	}
+	if own.Instruction != instruction {
+		t.Fatalf("redaction reached the owner's own read: %q", own.Instruction)
 	}
 }
 

@@ -5,7 +5,7 @@ import { markupDescription, markupImg } from '../../__mocks__/markup'
 import { mockSections, mockSection, mockSectionCompleted } from '../../__mocks__/section'
 import { withShare, withoutShare } from '../../__mocks__/share'
 import { mockApi } from '../../__mocks__/api'
-import { mockSpecEntries, mockSpecSection, specAtCap, specSingleField } from '../../__mocks__/metadata'
+import { mockSectionInstruction, mockSpecEntries, mockSpecSection, specAtCap, specSingleField } from '../../__mocks__/metadata'
 
 /**
  * The entry grid, either grouped by section or filtered to one.
@@ -91,6 +91,40 @@ export const SectionMode: Story = {
     mode: 'section',
     sectionInfo: mockSection,
     tags: [],
+  },
+}
+
+/**
+ * The same section, carrying a writing instruction.
+ *
+ * The block sits between the section's description and the documents, and the
+ * two are meant to be told apart at a glance: a label, full-strength text
+ * against the description's muted grey, and the 2px rule the product already
+ * uses for a blockquote. Read it beside `SectionMode` directly above, which is
+ * the same section without one — most sections have none, and they render
+ * exactly as they did before this feature: no ghost row, no reserved height.
+ */
+export const SectionWithInstruction: Story = {
+  args: {
+    ...SectionMode.args,
+    sectionInfo: { ...mockSection, instruction: mockSectionInstruction },
+  },
+}
+
+/**
+ * The same section while somebody is searching — **the instruction is gone**.
+ *
+ * A search turns the pane into a result list, and the rule for writing in this
+ * section has nothing to say about a list of matches; leaving it there pushes
+ * the first result down the page on every keystroke. It comes back when the box
+ * is cleared. The threshold is one character, so a stray keypress does not make
+ * the block flicker.
+ */
+export const SectionWithInstructionWhileSearching: Story = {
+  decorators: [withSearchResults([{ ...mockEntry, section_id: 'sec_001' }])],
+  args: { ...SectionWithInstruction.args },
+  play: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+    await typeQuery(canvasElement, 'composition')
   },
 }
 
@@ -345,6 +379,34 @@ export const InsideAShareSectionMode: Story = {
     loading: false,
     mode: 'section',
     sectionInfo: mockSection,
+    tags: [],
+  },
+}
+
+/**
+ * The same section, with an instruction, inside a share link — and **the
+ * instruction is not there**.
+ *
+ * An instruction is working process, like `instruction` on the research itself:
+ * it says how this team writes, which is not what the link was sent to show.
+ * The share payload is redacted server-side, so this `v-if` is the second
+ * defence rather than the first — but it is the one a story can check, and a
+ * component that renders whatever it is handed would leak the day a route
+ * forgets. Compare with `SectionWithInstruction` above: identical props apart
+ * from the share.
+ */
+export const InsideAShareInstructionHidden: Story = {
+  decorators: [withShare()],
+  args: {
+    entries: [
+      { ...mockEntry, section_id: 'sec_001' },
+      { ...mockEntryDraft, section_id: 'sec_001' },
+    ],
+    sections: mockSections,
+    researchSlug: 'R7',
+    loading: false,
+    mode: 'section',
+    sectionInfo: { ...mockSection, instruction: mockSectionInstruction },
     tags: [],
   },
 }
