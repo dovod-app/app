@@ -16,7 +16,7 @@
         <h1 class="page-title">{{ session.title }}</h1>
         <div class="session-header-actions">
           <StatusBadge :status="session.status" />
-          <TeamViewerNotice v-if="isViewer" :team-name="researchData?.data?.research?.team_name" />
+          <TeamViewerNotice v-if="readOnlyReason" :reason="readOnlyReason" :team-name="researchData?.data?.research?.team_name" />
           <ActionMenu>
             <!-- A run that ends without the agent marking the session
                  `completed` leaves the research showing an active session
@@ -235,7 +235,7 @@ const researchSlug = computed(() => researchData.value?.data?.research?.code || 
 // Every research-scoped page publishes the caller's role from the payload it
 // already fetches, so the controls beneath it — down to a checkbox inside
 // rendered content — know whether they may write.
-const { canWrite, canAdmin, isViewer, setFromResearch } = useResearchRole()
+const { canWrite, canAdmin, readOnlyReason, setFromResearch } = useResearchRole()
 watch(researchData, (d) => setFromResearch(d?.data?.research), { immediate: true })
 
 const { data, pending } = await useApi<{ data: any }>(`/api/researches/${id}/sessions/${sessionId}`)

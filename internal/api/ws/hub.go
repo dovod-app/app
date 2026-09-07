@@ -403,6 +403,20 @@ func visibleToShare(share *auth.Share, event Event) bool {
 		// template.* event carrying a research id, this file is not where they
 		// will think to look.
 		return false
+	case "section":
+		// Yes, and deliberately, though a section now carries two fields a share
+		// never sees: `field_spec` and `instruction`. The event body carries
+		// neither — this struct has no data field, so what crosses is "a section
+		// changed, and when".
+		//
+		// It is here as a case rather than falling through the default because
+		// the trade is a decision, not an omission. A visitor must see a rename,
+		// a status change and a reorder: the shared page refetches on exactly
+		// this event, and suppressing it would leave a stale section list on
+		// screen. The cost is that an edit touching only the instruction still
+		// rings their socket. Narrowing that needs the event to say which facet
+		// moved, which nothing in this envelope can express today.
+		return true
 	case "skill", "memory":
 		// Never. Which methodology a team follows is working process — the same
 		// class as `instruction` and `memory`, which no share has ever carried.

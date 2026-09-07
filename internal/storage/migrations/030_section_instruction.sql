@@ -1,0 +1,22 @@
+-- A section says how to write in it.
+--
+-- Three methodology surfaces now exist and the precedence is fixed: the
+-- research's memory says what this research is, a skill says how a kind of work
+-- is done, and this says how to write a document in this section. Most specific
+-- wins on a direct conflict, and it may not legislate beyond that.
+--
+-- The motivating case is the same one that produced field_spec: eighteen
+-- specifications in one section, each opening with five lines of hand-written
+-- preamble in slightly different words, because every one was written from
+-- scratch by an agent with no local convention to follow. The convention
+-- existed — it was in the documents rather than above them.
+--
+-- Capped at 500 runes in the service rather than here, and refused rather than
+-- truncated. Short is the whole mechanism: a per-folder note that runs to
+-- paragraphs gets summarised and diluted by the reader it was written for. The
+-- cap is counted in runes for the same reason skills.description is — a
+-- Cyrillic instruction is not worth half a Latin one.
+--
+-- Not versioned, unlike spec_version beside it. Nothing is validated against
+-- this text, so there is no document whose compliance a version would date.
+ALTER TABLE sections ADD COLUMN instruction TEXT NOT NULL DEFAULT '';

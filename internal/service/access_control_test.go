@@ -1177,3 +1177,77 @@ func TestAccessControl_EntryMarkdownExport(t *testing.T) {
 		}
 	})
 }
+
+// Roadmap ids, node ids and the node ids inside edges and parent links are all
+// handed to the service bare. Each must stop at the research boundary.
+func TestAccessControl_Roadmap(t *testing.T) {
+	db := setupTestDB(t)
+	notifier := &mockNotifier{}
+	log := slog.Default()
+	researchRepo := storage.NewResearchRepository(db)
+	researchSvc := NewResearchService(researchRepo, storage.NewSectionRepository(db), storage.NewTeamRepository(db), testAccess(db), notifier, log)
+	roadmapSvc := NewRoadmapService(storage.NewRoadmapRepository(db), storage.NewRoadmapNodeRepository(db),
+		storage.NewRoadmapEdgeRepository(db), researchRepo, testAccess(db), notifier, log)
+
+	userA, userB := setupTwoUsers(t, db)
+	ctxA, ctxB := userCtx(userA), userCtx(userB)
+
+	researchA, _, _ := researchSvc.Create(ctxA, CreateResearchRequest{Name: "Alice's Research", Goal: "Test"})
+	researchB, _, _ := researchSvc.Create(ctxB, CreateResearchRequest{Name: "Bob's Research", Goal: "Test"})
+
+	rmA, err := roadmapSvc.Create(ctxA, CreateRoadmapRequest{ResearchID: researchA.ID, Title: "Alice's plan",
+		Nodes: []CreateRoadmapNodeRequest{{TempID: "a", Title: "Secret step"}}})
+	if err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+	nodeA := rmA.Nodes[0].ID
+	rmB, err := roadmapSvc.Create(ctxB, CreateRoadmapRequest{ResearchID: researchB.ID, Title: "Bob's plan",
+		Nodes: []CreateRoadmapNodeRequest{{TempID: "b", Title: "Own step"}}})
+	if err != nil {
+		t.Fatalf("create B: %v", err)
+	}
+	nodeB := rmB.Nodes[0].ID
+
+	refused := map[string]func() error{
+		"get":  func() error { _, err := roadmapSvc.Get(ctxB, rmA.ID); return err },
+		"list": func() error { _, err := roadmapSvc.List(ctxB, researchA.ID); return err },
+		"update": func() error {
+			_, err := roadmapSvc.Update(ctxB, rmA.ID, UpdateRoadmapRequest{Title: ptr("Hacked")})
+			return err
+		},
+		"delete": func() error { return roadmapSvc.Delete(ctxB, rmA.ID) },
+		"add nodes": func() error {
+			_, err := roadmapSvc.AddNodes(ctxB, rmA.ID, []CreateRoadmapNodeRequest{{Title: "X"}}, nil)
+			return err
+		},
+		"update node": func() error {
+			_, err := roadmapSvc.UpdateNode(ctxB, nodeA, UpdateRoadmapNodeRequest{Title: ptr("Hacked")})
+			return err
+		},
+		"remove nodes": func() error { return roadmapSvc.RemoveNodes(ctxB, rmA.ID, []string{nodeA}) },
+		"remove a foreign node through one's own roadmap": func() error {
+			return roadmapSvc.RemoveNodes(ctxB, rmB.ID, []string{nodeA})
+		},
+		"edge from one's own roadmap to a foreign node": func() error {
+			_, err := roadmapSvc.AddNodes(ctxB, rmB.ID, nil, []CreateRoadmapEdgeRequest{{SourceNodeRef: nodeB, TargetNodeRef: nodeA}})
+			return err
+		},
+		"foreign node as parent": func() error {
+			_, err := roadmapSvc.UpdateNode(ctxB, nodeB, UpdateRoadmapNodeRequest{ParentID: ptr(nodeA)})
+			return err
+		},
+	}
+	for name, call := range refused {
+		if err := call(); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: expected ErrNotFound, got %v", name, err)
+		}
+	}
+
+	got, err := roadmapSvc.Get(ctxA, rmA.ID)
+	if err != nil {
+		t.Fatalf("owner get: %v", err)
+	}
+	if len(got.Nodes) != 1 || got.Nodes[0].Title != "Secret step" || len(got.Edges) != 0 {
+		t.Errorf("Alice's roadmap was changed by refused calls: %+v", got)
+	}
+}

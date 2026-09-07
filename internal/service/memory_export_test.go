@@ -18,7 +18,7 @@ func TestMemoryExport_LegacyJSONAndSessionRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"version":1,"research":{"name":"Legacy","status":"active","instruction":"exact ? '\n日本語","memory":["same","same",""]}}`), &legacy); err != nil {
 		t.Fatal(err)
 	}
-	r, err := exporter.Import(ctx, &legacy, "")
+	r, _, err := exporter.Import(ctx, &legacy, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestMemoryExport_LegacyJSONAndSessionRoundTrip(t *testing.T) {
 	// A forged local session ID must not override portable session linkage.
 	decoded.Research.Memory[3].SessionID = session.ID
 	for i := 0; i < 2; i++ {
-		imported, err := exporter.Import(ctx, &decoded, "")
+		imported, _, err := exporter.Import(ctx, &decoded, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +86,7 @@ func TestMemoryExport_UnlinkedNotesStayUnlinkedWithUnnamedSessions(t *testing.T)
 			t.Fatal(err)
 		}
 		exporter, _, _, _, _, _, _ := setupExportService(t)
-		imported, err := exporter.Import(context.Background(), &data, "")
+		imported, _, err := exporter.Import(context.Background(), &data, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -104,7 +104,7 @@ func TestMemoryExport_InvalidProcessRejectedBeforeCreatingResearch(t *testing.T)
 	} {
 		exporter, research, _, _, _, _, _ := setupExportService(t)
 		process.Name, process.Status = "Invalid", domain.ResearchActive
-		_, err := exporter.Import(context.Background(), &domain.ExportData{Version: 2, Research: process}, "")
+		_, _, err := exporter.Import(context.Background(), &domain.ExportData{Version: 2, Research: process}, "")
 		if !errors.Is(err, ErrValidation) {
 			t.Fatalf("invalid process accepted: %v", err)
 		}

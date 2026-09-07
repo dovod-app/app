@@ -23,8 +23,11 @@ route. The instance `api_token` is a separate credential and is not one of them:
 it identifies whoever runs the server, belongs to no team, and only the
 server-wide template routes accept it in place of a person. Fetch the spec from
 the instance you are talking to, because it is built from that server's
-configuration: where accounts are disabled it documents the writes as open and
-omits the OAuth endpoints entirely.
+configuration: where accounts are disabled it documents the writes as needing the
+instance `api_token`, or as open where there is no `api_token` either, and it
+omits the OAuth endpoints entirely. **Read that last case with the next section
+in hand**: an instance with neither credential takes a write only from the
+machine it runs on, which the document does not say.
 
 Its `servers` entry is the relative `/` unless the operator configured
 `base_url`, in which case it is that absolute URL. Relative is not a blank to
@@ -42,6 +45,112 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 
 **MCP prompts** (`research/initialize`, `research/conduct`) return workflow instructions that tell you which tools to call in which order. `research/initialize` takes an optional `topic` argument; `research/conduct` requires `research_id`. They are the recommended starting point for new research projects, but every action they describe can also be done with individual tool calls.
 
+## Connecting Over HTTP: Which Credential This Instance Wants
+
+Over **stdio** nothing is asked of you: the client starts the process, and the
+process is the boundary. Everything in this section is about the two transports
+that arrive over a socket, and **the credential is the same one for both** — the
+gate exists to protect the 52 tools, not a particular door, and a token that
+closes one and not the other is not a credential:
+
+- **Streamable HTTP** on the web port (`:8088` by default), which is what
+  ChatGPT, Claude.ai and most current clients speak.
+- **The legacy SSE transport** on the MCP port (`:8081` by default, path `/sse`),
+  which exists only when the server was started with `--transport sse`.
+
+On the Streamable HTTP side two paths reach the same handler behind the same gate
+— `/mcp`, and the catch-all `/`, which hands a `POST` or `DELETE` carrying
+`Content-Type: application/json` or an `Mcp-Session-Id` header, and a `GET` with
+`Accept: text/event-stream`, to the MCP transport. Changing the path does not
+change what is asked of you. **Post to `/mcp` anyway**: the catch-all compares
+`Content-Type` for exact equality, so a request declaring
+`application/json; charset=utf-8` is not recognised as MCP there and is answered
+with the web UI's HTML instead.
+
+| Instance | Send | Refusal if you do not |
+|---|---|---|
+| **Accounts on** (`auth_enabled`) | `Authorization: Bearer <token>` — a JWT from `POST /api/auth/login`, an API key from `POST /api/auth/api-keys`, or an OAuth2 access token from `POST /auth/token`; the three are interchangeable | `401 {"error":"unauthorized"}`. On SSE the refusal also carries `WWW-Authenticate: Bearer resource_metadata="…"`, which is where OAuth discovery starts |
+| **Accounts off, instance `api_token` configured** | `Authorization: Bearer <api_token>` — the instance token, exactly as the REST writes take it | `401 {"error":"invalid or missing bearer token"}` |
+| **Neither configured** | nothing — but only a caller on the machine the server runs on is let in | `401 {"error":"the write API is disabled: set api_token or auth_enabled to accept writes from another machine"}` |
+
+**On SSE an *account* token may also travel as `?token=<token>`**, in the query
+string, and that is not a shortcut for the lazy: the `EventSource` API cannot set
+request headers, so for a browser-based SSE client it is the only place to put
+one. The header is read first where both are present.
+
+**The instance `api_token` is refused in the query string**, on every transport
+including SSE — `?token=<api_token>` gets the same `401` as sending nothing. An
+account token is scoped to one person and can be revoked on its own; the
+instance token is the longest-lived, highest-privilege secret the server has, it
+does not rotate, and a query string is written verbatim into every proxy access
+log, browser history and `Referer`. Send it as `Authorization: Bearer
+<api_token>` or not at all.
+
+**The middle row is the one that breaks a client that used to work.** An instance
+with an `api_token` and no accounts used to refuse an anonymous `POST
+/api/entries` and then hand the same caller every tool through `tools/call`, on
+either transport. Both doors now want that token. A connection that has started
+failing with `invalid or missing bearer token` is not missing an account: ask the
+operator for the instance `api_token` and send it as the bearer — as a header, on
+SSE too. There is no account to register for on such an instance —
+`POST /api/auth/register` does not exist there.
+
+**"On the machine the server runs on" is exact, and it is four conditions.**
+
+1. The connection's peer address is loopback (`127.0.0.1`, `::1`).
+2. The request carries no `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header.
+   A reverse proxy adds one, and the proxy this project ships sits on the same
+   host — so behind it every caller is remote whatever address the server sees.
+3. The `Host` header names a loopback address (`localhost`, `127.0.0.1`, `[::1]`,
+   with or without a port). **Reaching the same server by its LAN address or its
+   hostname is refused** even from the same machine: `http://192.168.1.5:8088`
+   and `http://my-laptop.local:8088` both fail this, and so does a name that
+   resolves to `127.0.0.1` from outside. Use `localhost`.
+4. `Origin`, when the request carries one, also names a loopback address. Without
+   this the whole rule is bypassable by any web page the operator visits — the
+   server answers with `Access-Control-Allow-Origin: *`, so a script on another
+   site can reach `127.0.0.1` through the operator's own browser.
+
+There is no header that makes you local; sending a forwarding header, or an
+`Origin` from anywhere else, only makes you less so. This posture
+exists for the single-binary local run, not for an exposed port, and it gates
+**every tool**, reads included, because they reach the same services a write
+does. It guards the SSE listener on the same terms, so moving to the other port
+does not move you to another posture. REST *reads* are the exception in both
+credential-less postures: with accounts off they take no credential from
+anywhere, which is why a remote client can still fetch `/llms.txt`, the OpenAPI
+document and a research over HTTP while being refused both MCP transports.
+
+### Finding out which posture you are in
+
+Both probes below live on the **web port**, never on the SSE listener, which
+serves the transport and nothing else. An SSE client asks `:8088` what `:8081`
+will want of it.
+
+- `GET /api/auth/info` is public and answers on **every** instance, whether or
+  not accounts are configured: `{"auth_enabled": …, "allow_registration": …}`.
+  `auth_enabled: false` means accounts are off — it no longer means the route is
+  missing, so do not read a failure to fetch it as "accounts are on". It carries
+  `auto_login_token` only on a local instance running with `default_user`, and
+  only for a caller on that machine.
+- `GET /api/health` carries `write_api`, and it answers about **this request**,
+  not about the instance: whether the server would accept a write from the
+  caller asking. With accounts on it is `true` — the route carries no session to
+  check, and your role decides the rest. With an `api_token` and no accounts it
+  is `true` only when *this* request presented that token, so a browser holding
+  none is told `false`, which is the truth and is why the web UI stops rendering
+  Edit there. With neither configured it is `true` to a local client and `false`
+  to a remote one, the same answer as the refusal above.
+  It also carries `auth_enabled`, `version` and `in_memory` —
+  `in_memory: true` means nothing survives a restart.
+
+### A path that does not exist answers in JSON
+
+Any path under `/api/` matching no route is `404 {"error":"no such endpoint"}` on
+every method, `GET` included, and a method a real path does not serve lands
+there too rather than in a `405`. Never read a `200` with an HTML body as an
+answer from this API: that is the web UI, and a stale path used to return it.
+
 ## Available MCP Tools
 
 ### Research
@@ -49,7 +158,7 @@ shares. Do not acknowledge it on a user's behalf; use `entry_history` and
 | Tool | Purpose |
 |------|---------|
 | `research_create` | Create research with sections, tags, and goal. Optional `team_id` picks the team it lands in; omitted, it goes to your personal team. Optional `template_slug` records the methodology you followed and attaches the skills it names |
-| `research_get` | Load full research context (sections with their `spec_version` and, where non-empty, `field_spec`; entry counts; active session; and the skills index when the research follows any) |
+| `research_get` | Load full research context (sections with their `spec_version` and, where non-empty, their `instruction` and `field_spec`; entry counts; active session; and the skills index when the research follows any) |
 | `research_resume` | The outstanding work: tasks in progress, blocked and pending, the open and deferred questions of one session, the marks a person left, the documents changed most recently, and up to three candidate next actions each carrying its reason and whether it is yours or a person's. Read-only — no session is created, no status moves, nothing is marked as seen. It carries no `memory`, `field_spec` or skills index: `research_get` owns those, and the two are meant to be called in that order |
 | `research_list` | List every research you can reach, with optional status filter. Marks a shared one with `team` and a read-only one with `access: "read-only"` |
 | `research_update` | Update metadata or append one note with `add_memory` and optional `session_id` |
@@ -113,8 +222,18 @@ You do the work; they accept it. [Annotations](/llms/annotations.md).
 
 | Tool | Purpose |
 |------|---------|
-| `section_list` | List sections for a research, each with `spec_version` and — only when the section declares any — the `field_spec` its documents record |
-| `section_update` | Update section display name, description, status, position, or `field_spec` (the slug `name` is immutable). The only way to declare fields: `research_create` and `research_add_section` take none |
+| `section_list` | List sections for a research, each with `spec_version` and — only when the section has one — its `instruction` (how to write a document here) and the `field_spec` its documents record |
+| `section_update` | Update section display name, description, status, position, `instruction` or `field_spec` (the slug `name` is immutable). The only way to set either: `research_create` and `research_add_section` take neither |
+
+**Read the section's `instruction` before writing into it.** It is how *this*
+section is written — "Name the producing service. State the consumer. One
+paragraph of rationale, then the payload." — and both `section_list` and
+`research_get` hand it to you, so nothing extra needs calling. It outranks the
+research's memory and any skill on the narrow question of what a document filed
+here looks like, and nothing wider than that. Writing one is `section_update`
+with at most 500 characters; longer is refused, not trimmed. Where the section
+also declares fields, the instruction names those keys. [Skills → Three places a
+rule can live](/llms/skills.md), [Document Metadata](/llms/metadata.md).
 
 ### Templates
 
@@ -267,7 +386,7 @@ Consequences:
 - **List filters are nullable**: `research_list.status`, `entry_list.status`, `question_list.status` / `area` / `priority`, `task_list.status` / `priority`, `annotation_list.status` / `kind` / `entry_id` / `limit` / `offset`. `null` or `""` means "no filter".
 - **The two annotation tools are in the ordinary regime**, not among the exceptions above: send every property. `annotation_list` carries one plain string (`research_id`) and five nullable filters, so the queue read is `research_id` plus five `null`s. `annotation_answer` carries two plain strings — `annotation_id` and `resolution`, neither of which may be `null` or empty — and one nullable `task_id`.
 - **`research_resume` is in the ordinary regime as well.** `research_id` is a plain string, and it does resolve an `R1` code; `session_id` and `limit` are nullable, so the ordinary call is the research plus two `null`s. `session_id: null` selects the one active session, or returns the candidates with `selection_required` when several are open — it never picks for you. `limit: null` is 5, and a number outside 1–15 is clamped rather than refused.
-- **`null` and empty are different for a replacing field.** `metadata` (`entry_update`) and `field_spec` (`section_update`) are nullable but not "empty means empty": `null` leaves what is stored alone, while `{}` clears every value and `[]` removes every declared field. Send `null` unless you mean to erase.
+- **`null` and empty are different for a replacing field.** `metadata` (`entry_update`), `field_spec` and `instruction` (`section_update`) are nullable but not "empty means empty": `null` leaves what is stored alone, while `{}` clears every value, `[]` removes every declared field and `""` removes the instruction. Send `null` unless you mean to erase.
 - **Inside a `field_spec` item**, `key`, `label`, `type` and `required` must be present. `repeated`, `options` and `help` may be omitted; if you do send them, `options` accepts `null` while `repeated` (boolean) and `help` (string) do not — send `false` and `""`.
 - Unknown property names are rejected outright (`additionalProperties: false`).
 
@@ -286,6 +405,7 @@ Consequences:
 | `metadata` (`entry_create`) | No values recorded. `entry_update`: the stored values are left as they are |
 | `allow_incomplete` (`entry_update`) | `false` — completing a document with required fields unanswered is refused |
 | `field_spec` (`section_update`) | The section's declaration is left as it is |
+| `instruction` (`section_update`) | The section's writing instruction is left as it is. `""` removes it; over 500 characters the whole call is refused rather than truncated |
 | `limit` (`entry_history`) | `20` newest revisions; the result says `truncated: true` when more exist |
 | `format` (`research_export`) | `portable` — the JSON `research_import` takes. `obsidian` returns a vault download link instead; `json` / `vault` / `zip` are accepted aliases, anything else is a validation error |
 | `team_id` (`research_create`, `research_import`) | Your personal team |
@@ -625,6 +745,10 @@ Two more habits worth having:
   before**, and read the existing documents. The first two or three entries in a
   section set the pattern for every one after, and the `help` line on a field
   says where its value is supposed to come from.
+- **The same payload may carry an `instruction`** — the section's own rule for
+  how a document here is written. Follow it for this document; it beats the
+  research's memory and any skill on that narrow question, and it does not reach
+  beyond it.
 
 See [Document Metadata](/llms/metadata.md).
 

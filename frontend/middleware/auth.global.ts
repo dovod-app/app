@@ -1,13 +1,29 @@
 export default defineNuxtRouteMiddleware(async (to) => {
   const { authEnabled, isAuthenticated, fetchAuthInfo, checkAuth, loading } = useAuth()
 
+  // Both of these run before the app mounts, so neither is in flight yet when
+  // this guard first runs. Start the health request without awaiting it, so it
+  // overlaps the auth-info request instead of queueing behind it — otherwise a
+  // cold load pays two serial round trips on a blank page, which is a real
+  // second of nothing on the remote deployments this gating exists for.
+  const serverInfo = useServerInfo()
+  const health = serverInfo.load()
+
   // Fetch auth info once
   if (authEnabled.value === null) {
     await fetchAuthInfo()
   }
 
-  // Not an auth-enabled server — skip all checks
+  // Not an auth-enabled server — skip all checks.
+  //
+  // One thing still has to be known before the page renders: whether this
+  // browser may write. With no accounts the server decides that from where the
+  // request came from, or from an api_token the browser does not hold, and the
+  // page has no way to know which. Awaiting it here is what stops `canWrite`
+  // starting false and flipping true under the reader. It resolves once per
+  // tab, failure included.
   if (!authEnabled.value) {
+    await health
     return
   }
 

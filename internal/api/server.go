@@ -127,10 +127,48 @@ func NewServer(
 		})
 	}
 
+	// localOnly is the write gate for an instance with no credential configured
+	// at all.
+	//
+	// The config table promises that an unset `api_token` means the write API is
+	// disabled. It was not: `wrap` fell through to no auth, so a server started
+	// with the documented defaults accepted researches, sections, documents and
+	// share links from anyone who could reach the port — while `/api/health`
+	// reported `write_api: false` to the operator checking whether it was safe
+	// to expose.
+	//
+	// Refusing outright would have been the literal reading, and it would have
+	// deleted the local single-binary mode: the browser never holds an
+	// api_token, so with no accounts there is no credential a page can present,
+	// and the web UI would have become permanently read-only for the one person
+	// that mode exists for. The loopback exemption closes the hole the promise
+	// is about — a reachable port — and leaves that flow alone.
+	localOnly := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !auth.LocalRequest(r) {
+				// "from another machine" was the first wording and it was wrong
+				// for the case that hits people hardest: inside a container the
+				// operator's own browser arrives from the bridge gateway, so
+				// they are told their request came from somewhere it did not.
+				// Say what the rule is instead of guessing where they are.
+				//
+				// Both settings are named, and which one they want depends on
+				// what is calling: a browser cannot present an api_token.
+				log.Warn("write refused: this server accepts writes from its own machine only",
+					"method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "host", r.Host)
+				writeJSON(w, http.StatusUnauthorized, map[string]any{
+					"error": "the write API is disabled: this server accepts changes only from a client on the machine it runs on. Set api_token and send it as a bearer token for programmatic writes, or auth_enabled to sign in from a browser. Note that neither setting protects reads; only auth_enabled does.",
+				})
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+
 	// wrap applies auth to endpoints:
 	// - auth_enabled: user-based auth
 	// - api_token set: legacy bearer token
-	// - neither: no auth
+	// - neither: local callers only, per localOnly above
 	wrap := func(h http.Handler) http.Handler {
 		if requireAuth != nil {
 			return markAuthor(requireAuth(h))
@@ -138,7 +176,7 @@ func NewServer(
 		if cfg.APIToken != "" {
 			return markAuthor(bearerAuth(cfg.APIToken)(h))
 		}
-		return markAuthor(h)
+		return markAuthor(localOnly(h))
 	}
 
 	// wrapRead applies optional auth to read endpoints (user scoping when auth enabled)
@@ -185,13 +223,16 @@ func NewServer(
 		if cfg.APIToken != "" {
 			return bearerAuth(cfg.APIToken)(byToken)
 		}
-		// Neither a token nor accounts: a local run, where every write is
-		// already unauthenticated and there is no boundary for the operator to
-		// prove themselves across. Refusing here would only mean the feature
-		// cannot be tried without first inventing a credential. A different
-		// kind, though — the token narrows what its holder can see, and doing
-		// that here would hide a local user's own team templates from them.
-		return markAuthor(asOperator(auth.OperatorNoBoundary, h))
+		// Neither a token nor accounts: a local run, where there is no boundary
+		// for the operator to prove themselves across. Refusing a local caller
+		// here would only mean the feature cannot be tried without first
+		// inventing a credential. A different kind, though — the token narrows
+		// what its holder can see, and doing that here would hide a local
+		// user's own team templates from them.
+		//
+		// `localOnly` still applies: this is a write path, and "no boundary"
+		// describes the operator's own machine, not the network.
+		return markAuthor(localOnly(asOperator(auth.OperatorNoBoundary, h)))
 	}
 
 	// wrapReadOperator is the read side of the same story. Without it the
@@ -335,9 +376,25 @@ func NewServer(
 			}}},
 	})
 
+	// authInfo answers "does this instance have accounts" — the first thing the
+	// web UI asks, before it has anything to ask it with. It is registered
+	// below, outside the block, because the honest answer when auth is off is
+	// `false` and not a missing route: with the route inside the block the
+	// catch-all served the SPA's own HTML with a 200, the composable read a
+	// successful fetch as "accounts are on", and every page redirected to a
+	// login screen that could not be used because /api/auth/login did not exist
+	// either. Auth off made the whole web UI unreachable.
+	authInfo := func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"auth_enabled":       false,
+			"allow_registration": false,
+		})
+	}
+
 	// --- Auth endpoints (only when auth enabled) ---
 	if cfg.AuthEnabled && authSvc != nil {
 		ah := handlers.NewAuthHandler(authSvc, teamSvc, cfg.AutoLoginToken, log)
+		authInfo = ah.AuthInfo
 
 		sSession := envelope(map[string]*huma.Schema{
 			"user":  sUser,
@@ -412,16 +469,18 @@ func NewServer(
 			returns("200", "Revoked.", sOK).
 			build(), ah.DeleteAPIKey)
 
-		rt.route(accessPublic, op("GET", "/api/auth/info", "Authentication settings",
-			"What this instance expects of a client before it has one: whether accounts are on, whether registration is open, and — for a local `default_user` run — a token to log in with automatically.").
-			tag("Auth").
-			returns("200", "How this instance authenticates.", envelope(map[string]*huma.Schema{
-				"auth_enabled":       {Type: "boolean"},
-				"allow_registration": {Type: "boolean"},
-				"auto_login_token":   {Type: "string", Description: "Present only when `default_user` is configured; a JWT for that user."},
-			})).
-			build(), ah.AuthInfo)
 	}
+
+	rt.route(accessPublic, op("GET", "/api/auth/info", "Authentication settings",
+		"What this instance expects of a client before it has one: whether accounts are on, whether registration is open, and — for a local `default_user` run — a token to log in with automatically.\n\n"+
+			"This route answers whether or not accounts are configured. A client cannot ask \"are there accounts here\" only where there are.").
+		tag("Auth").
+		returns("200", "How this instance authenticates.", envelope(map[string]*huma.Schema{
+			"auth_enabled":       {Type: "boolean"},
+			"allow_registration": {Type: "boolean"},
+			"auto_login_token":   {Type: "string", Description: "Present only when `default_user` is configured **and** the request came from the machine the server runs on; a JWT for that user."},
+		})).
+		build(), authInfo)
 
 	// --- OAuth2 endpoints (only when auth enabled) ---
 	if cfg.AuthEnabled && cfg.OAuthSvc != nil && authSvc != nil {
@@ -684,11 +743,16 @@ func NewServer(
 		"Creates a research from a portable dump, with new ids and freshly allocated short codes. Cross-references are rewritten to point at the new codes.").
 		tag("Export").
 		body("A portable export.", envelope(map[string]*huma.Schema{"data": sExport})).
-		returns("201", "The research that was created.", envelope(map[string]*huma.Schema{
+		returns("201", "The research that was created, and anything the file carried that the import could not.", envelope(map[string]*huma.Schema{
 			"status":      {Type: "string"},
 			"research_id": {Type: "string"},
 			"code":        {Type: "string"},
 			"name":        {Type: "string"},
+			// Absent when there is nothing to report. Present, each string names
+			// one thing that did not survive — a section whose writing
+			// instruction was over the 500-character limit arrives without one,
+			// because it is dropped rather than truncated.
+			"warnings": {Type: "array", Items: &huma.Schema{Type: "string"}},
 		})).
 		build(), importHandler.Import)
 	// One markdown file into one section — the other half of the single-document
@@ -1645,7 +1709,12 @@ func NewServer(
 	} else if cfg.APIToken != "" {
 		log.Info("write API: bearer token required")
 	} else {
-		log.Info("write API: no authentication (api_token not set)")
+		// Spelled out, because the two people this bites are the ones who will
+		// not guess what "local" means: a container publishes its port, so the
+		// host's browser arrives from the bridge network and is refused, and a
+		// reverse proxy makes every caller look either remote or — worse, if it
+		// sets no forwarding header — local.
+		log.Warn("write API: writes accepted only from this machine (loopback, no proxy) — set api_token or auth_enabled to accept writes from a container, a proxy or another computer; reads stay open either way")
 	}
 
 	// WebSocket
@@ -1666,15 +1735,46 @@ func NewServer(
 			"status":       {Type: "string", Description: "Always `ok`."},
 			"version":      {Type: "string"},
 			"in_memory":    {Type: "boolean", Description: "True when the database is in memory and nothing survives a restart."},
-			"write_api":    {Type: "boolean", Description: "Whether writes are possible at all — an `api_token` is set, or accounts are on."},
+			"write_api":    {Type: "boolean", Description: "Whether the server would accept a write from **this request** — not whether a credential is configured somewhere. With accounts on it is `true` and your role decides the rest. With an `api_token` and no accounts it is `true` only when this request presented that token, so a browser holding none is told `false`. With neither configured it is `true` to a caller on the server's own machine and `false` to everyone else."},
 			"auth_enabled": {Type: "boolean"},
 		}, "status")).
 		build(), func(w http.ResponseWriter, r *http.Request) {
+		// Per caller, and it has to be what this request actually presented.
+		//
+		// It used to report `api_token != "" || auth_enabled`, which said
+		// `false` on an instance accepting anonymous writes from anywhere — the
+		// one answer that would stop an operator checking. Reading the config
+		// again here would repeat the mistake in the other direction: on an
+		// api_token instance every browser would be told `true`, and the web UI
+		// trusts this field to decide whether to render Edit at all, so it would
+		// render a full set of controls that each come back 401.
+		//
+		// With accounts on the honest answer is "yes, writes exist here" — this
+		// route carries no session to check, and the UI decides the rest from
+		// the caller's role.
+		writeAPI := cfg.AuthEnabled
+		switch {
+		case cfg.AuthEnabled:
+		case cfg.APIToken != "":
+			writeAPI = operatorCredential(cfg.APIToken, r)
+			// A wrong token presented here is a guess, and this route answers
+			// 200 either way — so without this line it is the one place an
+			// attacker can test candidate tokens and read the verdict while
+			// leaving no trace, when the same guess against a write logs.
+			// Only a presented-and-wrong credential is logged: the ordinary
+			// unauthenticated health check is every monitor in the world.
+			if !writeAPI && r.Header.Get("Authorization") != "" {
+				log.Warn("health: bearer token presented and rejected",
+					"remote", r.RemoteAddr, "host", r.Host)
+			}
+		default:
+			writeAPI = auth.LocalRequest(r)
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status":       "ok",
 			"version":      cfg.Version,
 			"in_memory":    cfg.IsInMemory,
-			"write_api":    cfg.APIToken != "" || cfg.AuthEnabled,
+			"write_api":    writeAPI,
 			"auth_enabled": cfg.AuthEnabled,
 		})
 	})
@@ -1705,11 +1805,53 @@ func NewServer(
 		build(), llmsHandler.ServeHTTP)
 	rt.undocumented("GET /llms/", http.StripPrefix("/", llmsHandler))
 
+	// Anything under /api/ that matched no route above is a 404, in JSON, on
+	// every method.
+	//
+	// Without this the catch-all below took them, and answered in two languages
+	// neither of which was the API's: a GET returned 200 with the SPA's index
+	// page, so a client with a stale path — or a monitor watching a route that
+	// had been renamed — saw success and a mouthful of HTML; a POST or a DELETE
+	// reached the MCP handler and came back with "malformed payload: invalid
+	// message version tag" or "DELETE requires an Mcp-Session-Id header",
+	// describing a protocol the caller was not speaking. The 200 was the worse
+	// of the two: it is how the web UI's own auth probe came to read a missing
+	// route as a successful answer.
+	//
+	// 404 and not 405 on a method mismatch: this pattern carries no method, so
+	// it matches before Go's mux reaches the point where it would collect the
+	// allowed ones. The share prefix settled the same question the same way, for
+	// the same reason — see `notThere` in share_routes.go.
+	rt.undocumented("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "no such endpoint"})
+	}))
+
 	// MCP Streamable HTTP transport (used by ChatGPT, Claude.ai)
 	if cfg.MCPHandler != nil {
-		var mcpEndpoint http.Handler = cfg.MCPHandler
-		if requireAuth != nil {
+		// This endpoint takes the same credential the REST writes take.
+		//
+		// `wrap` has recognised the api_token since it was introduced; this one
+		// never did, so an instance configured with `api_token` and no accounts
+		// — the posture the Write API section of CLAUDE.md describes — refused
+		// an anonymous `POST /api/entries` with a 401 and then handed the same
+		// caller every tool through `tools/call`, writes included. The gate was
+		// on one of the two doors into the same services.
+		//
+		// The catch-all below dispatches to this same handler, so gating only
+		// `/mcp` would leave the hole open on every other path.
+		//
+		// With no credential configured it takes the same loopback exemption
+		// the REST writes take. Every tool reaches the services a write goes
+		// through, so leaving this door open would have made `localOnly` on the
+		// REST side decorative.
+		var mcpEndpoint http.Handler
+		switch {
+		case requireAuth != nil:
 			mcpEndpoint = requireAuth(cfg.MCPHandler)
+		case cfg.APIToken != "":
+			mcpEndpoint = bearerAuth(cfg.APIToken)(cfg.MCPHandler)
+		default:
+			mcpEndpoint = localOnly(cfg.MCPHandler)
 		}
 		rt.undocumented("/mcp", mcpEndpoint)
 		log.Info("MCP Streamable HTTP endpoint registered at /mcp")

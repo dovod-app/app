@@ -57,6 +57,7 @@ type UpdateSectionRequest struct {
 	Description *string             `json:"description,omitempty"`
 	Status      *string             `json:"status,omitempty" enum:"draft,active,completed"`
 	Position    *int                `json:"position,omitempty"`
+	Instruction *string             `json:"instruction,omitempty" doc:"How to write a document in this section — three to six lines of imperatives, read before every document filed here. At most 500 characters, refused rather than truncated. Send \"\" to remove it."`
 	FieldSpec   *[]domain.FieldSpec `json:"field_spec,omitempty" doc:"The typed fields documents in this section must carry. GET /api/metadata/schema describes what is allowed."`
 }
 

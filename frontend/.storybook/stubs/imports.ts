@@ -70,6 +70,23 @@ export const useApi = (url: any) => {
   }
 }
 
+/**
+ * What the server says about itself.
+ *
+ * `writeApi` must be `true` here. `useResearchRole().canWrite` returns it when
+ * `authEnabled` is false, which is the posture every story runs in — a stub
+ * returning false would not crash anything, it would quietly render the whole
+ * catalogue in its viewer variant, with no edit control anywhere and no failing
+ * assertion to say so. RoadmapNodePopover.stories.ts documents its own reliance
+ * on this being true.
+ */
+export const useServerInfo = () => ({
+  info: ref({ status: 'ok', version: 'dev', in_memory: true, write_api: true, auth_enabled: false }),
+  writeApi: ref(true),
+  version: ref('dev'),
+  load: () => Promise.resolve(),
+})
+
 export const useAuth = () => ({
   user: ref(null),
   token: ref(null),

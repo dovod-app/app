@@ -119,6 +119,7 @@ Who may do what. A team owns researches; membership in that team is the whole of
 - **Not a member of the owning team** → the research does not exist for you: `not found` from a tool, `404` from REST. Confirming that someone else's research exists is itself a leak, so this is deliberate.
 - **A member without the right** — a `viewer` writing — → `your role in this team does not allow this`, `403` from REST. Hiding a research from someone who can already read it would protect nothing.
 - With `auth_enabled: false` there is no caller and no check: everything lives in one local team and every operation is permitted, exactly as before teams existed.
+- Roles are the second gate, not the first. Before any of them, the request has to be taken at all: with accounts on, every route but the public handful needs `Authorization: Bearer <JWT | API key | OAuth access token>`; with accounts off but an `api_token` configured, every **write** and every MCP call on either socket transport — Streamable HTTP at `/mcp` and the legacy SSE listener — needs `Authorization: Bearer <api_token>` as a header on every transport — the instance token is refused in a `?token=` query string, which is for account tokens only; with neither configured, those same requests are accepted only from a client on the machine the server runs on — a loopback peer address, carrying no `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header, naming a loopback `Host`, and with any `Origin` also loopback — and answer `401 the write API is disabled: set api_token or auth_enabled to accept writes from another machine` to anyone else. REST **reads** ask for nothing in both credential-less postures. Full table: [MCP Client Guide → Connecting Over HTTP](/llms/mcp-client-guide.md#connecting-over-http-which-credential-this-instance-wants).
 - The WebSocket at `/ws` needs the same credential as everything else when auth is on, and delivery is decided **per event, per connection**: a research event reaches only those who may read it, a team event only its members, and losing access stops the updates on a socket already open. See [Real-time Events](#real-time-events) below.
 - That local team survives if auth is later turned on. It has no members, so its researches are **readable by every signed-in user and writable by none** until the first registration claims them — a deliberate compromise between stranding them behind a team nobody can join and letting the first caller take them for themselves.
 
@@ -155,7 +156,7 @@ Who may do what. A team owns researches; membership in that team is the whole of
 | `POST` | `/api/invites/{token}/accept` | a signed-in user |
 | `POST` | `/api/researches/{id}/transfer` | owner of the source team, write access in the target |
 
-Every `/api/teams` and `/api/invites` route except the public preview needs a session: with `auth_enabled: false` they answer `401 sign in to manage teams`, because there are no users to put in a team. The transfer route is the exception — with no caller there is nothing to check, and it moves the research.
+Every `/api/teams` and `/api/invites` route except the public preview needs a session: with `auth_enabled: false` they answer `401 sign in to manage teams`, because there are no users to put in a team. The transfer route is the exception — with no caller there is nothing to check, and it moves the research, for a caller the server takes a write from at all (with no `api_token` either, one on its own machine).
 
 `GET /api/researches` lists every research across all your teams and takes `?team={id}` to narrow it to one, and each item carries `team_id`, `team_name`, `team_is_personal` and `role`.
 
@@ -222,6 +223,7 @@ That list is the whole surface. Anything else under the prefix — another metho
 
 - Private skills and memory — memory is redacted on research reads, and skill services and exports exclude skills for share contexts. They are the agent's working notes about how to conduct the research, not a result, and their author did not publish them by sending a link to the findings.
 - `user_id`, `team_id`, `team_name`, `team_is_personal` — a share is about one research, not about the organisation behind it. `role` survives and is always `viewer`.
+- The section's `instruction`. How a team writes here is working process, like the memory above it: a visitor was handed the findings, not the conventions they were written under. It is stripped from every section a share reads, so the shared research page, the graph, the export and the vault never carry one.
 - Document metadata, values and declaration both. An entry's `metadata`, `spec_version` and `metadata_status` are stripped, and so is the section's `field_spec` — a list of twelve field labels with nothing in them still says what the team decided to track, and the values are exactly the facts a declaration invites a team to record: an owner, a cost, an interviewee, an internal ticket.
 - Any other research. There is no list route under the prefix, and the listing service itself answers empty for a share rather than falling through to "no user in context, so no filter" — which would have returned every research on the server.
 - The portable JSON: its route is not mounted. The Obsidian vault is available when `include.export` allows it, with memory and private skills excluded; revisions and provenance are refused. See [Export](/llms/export.md#export-through-a-share-link).
@@ -238,7 +240,7 @@ That list is the whole surface. Anything else under the prefix — another metho
 
 **Revocation** takes effect on the next request; every layer consults the share per request. The exception is an open WebSocket, which re-resolves the link on its own timer and closes within the minute — see [Real-time Events](#real-time-events).
 
-**No MCP tool creates, lists or revokes a share.** Handing out a public link is a human act; the tool list is unchanged. A share token is a REST credential only — it never reaches an MCP endpoint. Shares also work with `auth_enabled: false`, where the row simply records no creator.
+**No MCP tool creates, lists or revokes a share.** Handing out a public link is a human act; the tool list is unchanged. A share token is a REST credential only — it never reaches an MCP endpoint. Shares also work with `auth_enabled: false`, where the row simply records no creator — but issuing one is a write, so on an instance with no `api_token` either it can only be done from the machine the server runs on. Visiting a link is not: the routes under `/api/shared/{token}/…` take the token as their whole credential and are reachable from anywhere, whatever posture the instance is in.
 
 ---
 
@@ -254,6 +256,7 @@ Logical division within a research. Organizes entries by topic.
 | `position` | int | Sort order (0-based) — investigation sequence |
 | `status` | enum | `draft` / `active` / `completed` / `archived` |
 | `code` | string | Auto-assigned: `S1`, `S2`... (per research) |
+| `instruction` | string | How to write a document **in this section** — three to six lines of imperatives, read before every document filed here. At most 500 characters, counted in runes. Empty is the normal case |
 | `field_spec` | object[] | What documents in this section record: `{key, label, type, required, repeated, options, help}`. Empty is the normal case and means the section accepts no metadata at all |
 | `spec_version` | int | Bumped when `field_spec` actually changes; entries record the version their values were validated against |
 
@@ -263,7 +266,9 @@ Logical division within a research. Organizes entries by topic.
 - Requires at least one entry before marking `completed`.
 - A section is usually a *topic* and declares nothing. Declare `field_spec` only when it holds one class of document repeatedly — eighteen specifications, not eight loose questions. The vocabulary is then closed: an entry may write those keys and no others. See [Document Metadata](/llms/metadata.md).
 - `field_spec` is settable only through `section_update` / `PUT /api/sections/{sectionId}` — neither `research_create` nor `research_add_section` accepts one. A portable import is the exception: the declaration travels with the section.
-- `section_list` and `research_get` return `spec_version` on every section and `field_spec` only when it is non-empty.
+- `instruction` is settable the same two ways and nowhere else, with the same import exception — where an over-long one is dropped rather than refused, and named in the import's `warnings` so the loss is visible. `null` leaves it alone and `""` removes it; over REST the property may also simply be left out, while the `section_update` schema requires it like every other property, so send `null` there. Over 500 runes it is **refused**, never truncated — `instruction must be 500 characters or fewer…`, a `400` over REST — because half a rule reads like a whole one.
+- **An instruction says what a document here looks like and nothing wider.** The research's memory says what *this research* is, a [skill](#skill) says how a *kind of work* is done, and this says how to write in this section; most specific wins on a direct conflict. An instruction restating research-wide tone or methodology is misfiled. Where the section also declares `field_spec`, the instruction should name those keys, or the two end up describing the same document differently. See [Skills → Three places a rule can live](/llms/skills.md) and [Document Metadata](/llms/metadata.md).
+- `section_list` and `research_get` return `spec_version` on every section, and `field_spec` and `instruction` only when they are non-empty. REST section payloads carry `instruction` always, as `""` when there is none.
 
 ---
 

@@ -16,7 +16,7 @@ type RoadmapUpdateNodeInput struct {
 	Status      *string  `json:"status" jsonschema:"New status (must be from the roadmap's statuses list)"`
 	PositionX   *float64 `json:"position_x" jsonschema:"New X position"`
 	PositionY   *float64 `json:"position_y" jsonschema:"New Y position"`
-	ParentID    *string  `json:"parent_id" jsonschema:"New parent node ID (empty string to clear)"`
+	ParentID    *string  `json:"parent_id" jsonschema:"New parent node ID; must be a node of the same roadmap (empty string to clear)"`
 	RefType     *string  `json:"ref_type" jsonschema:"Reference type: entry, task, session, research, question (empty string to clear)"`
 	RefID       *string  `json:"ref_id" jsonschema:"ID of the referenced entity (empty string to clear)"`
 	Metadata    *string  `json:"metadata" jsonschema:"JSON string with node-type-specific data"`

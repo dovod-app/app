@@ -640,7 +640,7 @@ func TestImport_InvalidVersion(t *testing.T) {
 	ctx := context.Background()
 	exportSvc, _, _, _, _, _, _ := setupExportService(t)
 
-	_, err := exportSvc.Import(ctx, &domain.ExportData{Version: 99}, "")
+	_, _, err := exportSvc.Import(ctx, &domain.ExportData{Version: 99}, "")
 	if err == nil {
 		t.Fatal("expected error for invalid version")
 	}
@@ -660,7 +660,7 @@ func TestImport_MinimalResearch(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -691,7 +691,7 @@ func TestImport_WithSections(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -735,7 +735,7 @@ func TestImport_WithEntries(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -780,7 +780,7 @@ func TestImport_WithEntrySessionLinking(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -834,7 +834,7 @@ func TestImport_WithSessions(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -906,7 +906,7 @@ func TestImport_WithQuestionHierarchy(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -971,7 +971,7 @@ func TestImport_WithTasks(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1035,7 +1035,7 @@ func TestImport_WithRoadmaps(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1087,7 +1087,7 @@ func TestImport_WithInstructionAndMemory(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1117,7 +1117,7 @@ func TestImport_ArchivedResearchStatus(t *testing.T) {
 		},
 	}
 
-	research, err := exportSvc.Import(ctx, data, "")
+	research, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1242,7 +1242,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 
 	// Import
-	newResearch, err := exportSvc.Import(ctx, &imported, "")
+	newResearch, _, err := exportSvc.Import(ctx, &imported, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1333,7 +1333,7 @@ func TestExportImportRoundTrip_PreservesEntryContent(t *testing.T) {
 	var imported domain.ExportData
 	json.Unmarshal(jsonBytes, &imported)
 
-	newResearch, err := exportSvc.Import(ctx, &imported, "")
+	newResearch, _, err := exportSvc.Import(ctx, &imported, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1394,7 +1394,7 @@ func TestExportImportRoundTrip_PreservesEntryType(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	newResearch, err := exportSvc.Import(ctx, &imported, "")
+	newResearch, _, err := exportSvc.Import(ctx, &imported, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1433,7 +1433,7 @@ func TestImport_EntryWithoutTypeIsMarkdown(t *testing.T) {
 	ctx := context.Background()
 	exportSvc, _, _, entrySvc, _, _, _ := setupExportService(t)
 
-	research, err := exportSvc.Import(ctx, &domain.ExportData{
+	research, _, err := exportSvc.Import(ctx, &domain.ExportData{
 		Version: 1,
 		Research: domain.ExportResearch{
 			Name:   "Legacy Export",
@@ -1508,7 +1508,7 @@ func TestImport_RejectsBadEntriesBeforeWriting(t *testing.T) {
 				},
 			}
 
-			_, err := exportSvc.Import(ctx, data, "")
+			_, _, err := exportSvc.Import(ctx, data, "")
 			if err == nil {
 				t.Fatal("import succeeded, want a validation error")
 			}
@@ -1555,7 +1555,7 @@ func TestExportImportRoundTrip_MultipleRoadmaps(t *testing.T) {
 	var imported domain.ExportData
 	json.Unmarshal(jsonBytes, &imported)
 
-	newResearch, err := exportSvc.Import(ctx, &imported, "")
+	newResearch, _, err := exportSvc.Import(ctx, &imported, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1596,7 +1596,7 @@ func TestExportImportRoundTrip_TaskStatuses(t *testing.T) {
 	var imported domain.ExportData
 	json.Unmarshal(jsonBytes, &imported)
 
-	newResearch, err := exportSvc.Import(ctx, &imported, "")
+	newResearch, _, err := exportSvc.Import(ctx, &imported, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1750,12 +1750,12 @@ func TestImport_DuplicateImportCreatesSeparateResearch(t *testing.T) {
 		},
 	}
 
-	r1, err := exportSvc.Import(ctx, data, "")
+	r1, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import 1: %v", err)
 	}
 
-	r2, err := exportSvc.Import(ctx, data, "")
+	r2, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import 2: %v", err)
 	}
@@ -1808,7 +1808,7 @@ func TestExportImportRoundTrip_PreservesBlockDocument(t *testing.T) {
 	var imported domain.ExportData
 	json.Unmarshal(jsonBytes, &imported)
 
-	newResearch, err := exportSvc.Import(ctx, &imported, "")
+	newResearch, _, err := exportSvc.Import(ctx, &imported, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1861,7 +1861,7 @@ func TestImport_LegacyFileWithoutEntryType(t *testing.T) {
 	// Strip the field the way an older file would not have it.
 	data.Research.Sections[0].Entries[0].Type = ""
 
-	newResearch, err := exportSvc.Import(ctx, data, "")
+	newResearch, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -1937,7 +1937,7 @@ func TestExport_AnnotationsSurviveARoundTrip(t *testing.T) {
 		t.Errorf("mark travelled wrong: %+v", marks[0])
 	}
 
-	imported, err := exportSvc.Import(ctx, data, "")
+	imported, _, err := exportSvc.Import(ctx, data, "")
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
